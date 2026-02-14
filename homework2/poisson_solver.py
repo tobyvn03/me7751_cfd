@@ -25,9 +25,8 @@ def main():
 
     (x, y), h = create_grid(N)
     Q = 4*y**3 - 6*y**2 + 2 - 6*(1 - x**2)*(2*y - 1)
-    T_initial = np.zeros((N, N))
-    if verbose:
-        print(f'x:\n{x}\ny:\n{y}\nT_initial:\n{T_initial}')
+    T_initial = (1 - x**2)*(2*y**3 - 3*y**2 + 1)
+    T_analytical = (1 - x**2)*(2*y**3 - 3*y**2 + 1)
 
     plot_solution(x, y, T_initial, 'initial', output_file='initial_solution.png')
 
@@ -44,7 +43,6 @@ def main():
         print(f'{method.capitalize()} method converged in {k} iterations.')
 
     plot_solution(x, y, T, method.capitalize(), output_file=f'{method}_solution.png')
-    T_analytical = (1 - x**2)*(2*y**3 - 3*y**2 + 1)
     plot_solution(x, y, T_analytical, 'analytical', output_file='analytical_solution.png')
     plot_solution(x, y, Q, 'source term Q', output_file='source_term_Q.png')
     plot_solution(x, y, T - T_analytical, 'error', output_file='error.png')
@@ -77,7 +75,7 @@ def jacobi_method(x, y, h, Q, T_initial, k_max, verbose):
 def apply_boundary_conditions(x, y, T):
     T[0, :] = T[1, :]
     T[-1, :] = T[-2, :]
-    T[:, 0] = 2*y[:, 0]**3 - 3*y[:, 0]**2 + 1
+    T[:, 0] = (1 - x[:, 0]**2)*(2*y[:, 0]**3 - 3*y[:, 0]**2 + 1)
     T[:, -1] = 0
 
 def plot_solution(x, y, T, method, output_file=None):
