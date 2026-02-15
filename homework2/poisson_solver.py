@@ -30,23 +30,24 @@ def main():
     T_initial = (2*y**3 - 3*y**2 + 1)
     T_analytical = (1 - x**2)*(2*y**3 - 3*y**2 + 1)
 
+    print(f'Grid size: {N}x{N}, Method: {method}, Max iterations: {k_max}, Tolerance: {tolerance}, Alpha (for SOR): {alpha}')
+
     if method == 'jacobi':
-        T, k = jacobi_method(x, y, h, Q, T_initial, k_max, tolerance, verbose)
+        T, k = jacobi_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose)
     elif method == 'gauss-seidel':
-        # T = gauss_seidel_method(x, y, h, Q, T_initial, k_max)
-        pass
+        T, k = gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose)
     elif method == 'sor':
-        # T = sor_method(x, y, h, Q, T_initial, k_max, alpha)
-        pass
+        T, k = sor_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose)
 
     if verbose:
-        print(f'{method.capitalize()} method converged in {k+1} iterations.')
+        print(f'Grid size: {N}x{N}, Method: {method}, Max iterations: {k_max}, Tolerance: {tolerance}, Alpha (for SOR): {alpha}')
+    print(f'{method.capitalize()} method converged in {k+1} iterations.')
 
     plot_solution(x, y, T_initial, 'initial', output_file='initial_solution.png')
     plot_solution(x, y, T, method.capitalize(), output_file=f'{method}_solution.png')
     plot_solution(x, y, T_analytical, 'analytical', output_file='analytical_solution.png')
     plot_solution(x, y, Q, 'source term Q', output_file='source_term_Q.png')
-    plot_solution(x, y, T - T_analytical, 'error', output_file='error.png')
+    plot_solution(x, y, np.abs(T - T_analytical), 'absolute error', output_file='error.png')
 
 def create_grid(N):
     x = np.linspace(0, 1, N)
@@ -54,24 +55,49 @@ def create_grid(N):
     h = 1 / (N - 1)
     return np.meshgrid(x, y), h
 
-def jacobi_method(x, y, h, Q, T_initial, k_max, tolerance, verbose):
-    T_old = T_initial.copy()
+def jacobi_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose):
+    T = T_initial.copy()
+    T_new = T_initial.copy()
+    apply_boundary_conditions(x, y, T)
     for k in range(k_max):
-        apply_boundary_conditions(x, y, T_old)
-        neighbors = (np.pad(T_old, ((0, 0), (1, 0)), mode='constant')[:, :-1]
-                 + np.pad(T_old, ((0, 0), (0, 1)), mode='constant')[:, 1:]
-                 + np.pad(T_old, ((1, 0), (0, 0)), mode='constant')[:-1, :]
-                 + np.pad(T_old, ((0, 1), (0, 0)), mode='constant')[1:, :])
-        T_new = 0.25 * (neighbors - Q * h**2)
+        for i in range(1, N - 1):
+            for j in range(1, N - 1):
+                T_new[i, j] = 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] + Q[i, j] * h**2)
         apply_boundary_conditions(x, y, T_new)
-
-        change = np.linalg.norm(T_new - T_old, ord=np.inf)
-        if verbose:
-            print(f'Iteration {k+1}, max change: {change:.6e}')
-        if change < tolerance:
+        if verbose and k < 5:
+            print(f'Iteration {k+1}:\n{T_new}')
+        if np.linalg.norm(T_new - T) < tolerance:
             break
-        T_old = T_new
-    return T_old, k
+        T[:] = T_new[:]
+    return T, k
+
+def gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose):
+    T = T_initial.copy()
+    apply_boundary_conditions(x, y, T)
+    for k in range(k_max):
+        for i in range(1, N - 1):
+            for j in range(1, N - 1):
+                T[i, j] = 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] + Q[i, j] * h**2)
+        apply_boundary_conditions(x, y, T)
+        if verbose and k < 5:
+            print(f'Iteration {k+1}:\n{T}')
+        if np.linalg.norm(T - T_initial) < tolerance:
+            break
+    return T, k
+
+def sor_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose):
+    T = T_initial.copy()
+    apply_boundary_conditions(x, y, T)
+    for k in range(k_max):
+        for i in range(1, N - 1):
+            for j in range(1, N - 1):
+                T[i, j] = (1 - alpha) * T[i, j] + alpha * 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] + Q[i, j] * h**2)
+        apply_boundary_conditions(x, y, T)
+        if verbose and k < 5:
+            print(f'Iteration {k+1}:\n{T}')
+        if np.linalg.norm(T - T_initial) < tolerance:
+            break
+    return T, k
 
 def apply_boundary_conditions(x, y, T):
     T[0, :] = T[1, :]
