@@ -30,8 +30,6 @@ def main():
     T_initial = (2*y**3 - 3*y**2 + 1)
     T_analytical = (1 - x**2)*(2*y**3 - 3*y**2 + 1)
 
-    plot_solution(x, y, T_initial, 'initial', output_file='initial_solution.png')
-
     if method == 'jacobi':
         T, k = jacobi_method(x, y, h, Q, T_initial, k_max, tolerance, verbose)
     elif method == 'gauss-seidel':
@@ -44,6 +42,7 @@ def main():
     if verbose:
         print(f'{method.capitalize()} method converged in {k+1} iterations.')
 
+    plot_solution(x, y, T_initial, 'initial', output_file='initial_solution.png')
     plot_solution(x, y, T, method.capitalize(), output_file=f'{method}_solution.png')
     plot_solution(x, y, T_analytical, 'analytical', output_file='analytical_solution.png')
     plot_solution(x, y, Q, 'source term Q', output_file='source_term_Q.png')
@@ -64,7 +63,7 @@ def jacobi_method(x, y, h, Q, T_initial, k_max, tolerance, verbose):
                  + np.pad(T_old, ((1, 0), (0, 0)), mode='constant')[:-1, :]
                  + np.pad(T_old, ((0, 1), (0, 0)), mode='constant')[1:, :])
         T_new = 0.25 * (neighbors - Q * h**2)
-        # apply_boundary_conditions(x, y, T_new)
+        apply_boundary_conditions(x, y, T_new)
 
         change = np.linalg.norm(T_new - T_old, ord=np.inf)
         if verbose:
@@ -75,15 +74,15 @@ def jacobi_method(x, y, h, Q, T_initial, k_max, tolerance, verbose):
     return T_old, k
 
 def apply_boundary_conditions(x, y, T):
-    # T[0, :] = T[1, :]
-    # T[-1, :] = T[-2, :]
-    # T[:, 0] = (1 - x[:, 0]**2)*(2*y[:, 0]**3 - 3*y[:, 0]**2 + 1)
-    # T[:, -1] = 0
+    T[0, :] = T[1, :]
+    T[-1, :] = T[-2, :]
+    T[:, 0] = (1 - x[:, 0]**2)*(2*y[:, 0]**3 - 3*y[:, 0]**2 + 1)
+    T[:, -1] = 0
 
-    T[0, :] = (1 - x[0, :]**2)*(2*y[0, :]**3 - 3*y[0, :]**2 + 1)
-    T[-1, :] = 0
-    T[:, 0] = T[:, 1]
-    T[:, -1] = T[:, -2]
+    # T[0, :] = (1 - x[0, :]**2)*(2*y[0, :]**3 - 3*y[0, :]**2 + 1)
+    # T[-1, :] = 0
+    # T[:, 0] = T[:, 1]
+    # T[:, -1] = T[:, -2]
 
 def plot_solution(x, y, T, method, output_file=None):
     plt.figure(figsize=(8, 6))
