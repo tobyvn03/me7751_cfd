@@ -143,3 +143,36 @@ Successive Overrelaxation (SOR):
 $$
 T^{k+1}_{i,j} = T^k_{i,j} - \alpha \left[\frac{Q_{i,j}}{a^P_{i,j}} + \frac{a^W_{i,j}}{a^P_{i,j}} T^{k+1}_{i-1,j} + \frac{a^E_{i,j}}{a^P_{i,j}} T^k_{i+1,j} + \frac{a^S_{i,j}}{a^P_{i,j}} T^{k+1}_{i,j-1} + \frac{a^N_{i,j}}{a^P_{i,j}} T^k_{i,j+1}\right]
 $$
+
+## Problem 1c
+
+The Jacobi method was ran until...
+
+$$
+\Vert \{T\}^{k+1} - \{T\}^k \Vert_\infty < 10^{-6}
+$$
+
+...using the initial condition...
+
+$$
+T^0_{i,j} = 2y^3_j - 3y^2_j + 1
+$$
+
+The mean absolute error (MAE) between the numerical and analytical was computed as...
+
+$$
+\text{MAE} = \frac{1}{N^2}\sum^{N-1}_{i=0}\sum^{N-1}_{j=0}|T^{\text{numerical}}_{i,j} - T^{\text{analytical}}_{i,j}|
+$$
+
+| Grid Size: 10×10 | Grid Size: 20×20 | Grid Size: 40×40 |
+|:-:|:-:|:-:|
+| ![](results/jacobi_solution_10.png) | ![](results/jacobi_solution_20.png) | ![](results/jacobi_solution_40.png) |
+| ![](results/analytical_solution_10.png) | ![](results/analytical_solution_20.png) | ![](results/analytical_solution_40.png) |
+| MAE = 2.647129e-02 | MAE = 1.188699e-02 | MAE = 5.613272e-03 |
+
+To plot the temperature along the vertical centerline, the x-coordinate of the centerline in the finite difference grid was found by taking the floor of $\frac{N}{2}$.
+
+![](results/jacobi_centerline_2c.png)
+
+## Problem 1d
+
