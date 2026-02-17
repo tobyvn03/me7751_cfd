@@ -170,7 +170,7 @@ Run `homework2c.sh` to regenerate all graphs used.
 |:-:|:-:|:-:|
 | ![](results_hw2c/jacobi_11.png) | ![](results_hw2c/jacobi_21.png) | ![](results_hw2c/jacobi_41.png) |
 | ![](results_hw2c/analytical_11.png) | ![](results_hw2c/analytical_21.png) | ![](results_hw2c/analytical_41.png) |
-| MAE = 2.348063e-02 | MAE = 1.124218e-02 | MAE = 5.466628e-03 |
+| $\text{MAE} = 2.348063\times 10^{-2}$ | $\text{MAE} = 1.124218\times 10^{-2}$ | $\text{MAE} = 5.466628\times 10^{-3}$ |
 
 To plot the temperature along the vertical centerline, the x-coordinate of the centerline in the finite difference grid was found by taking the floor of $\frac{N}{2}$.
 
@@ -178,7 +178,7 @@ To plot the temperature along the vertical centerline, the x-coordinate of the c
 
 ## Problem 1d
 
-The spatial convergence rate of the finite difference scheme can be modeled by a power law of roughly first-order with respect to $N$. In this plot, the flux boundary condition is discretized as...
+The spatial convergence rate of the finite difference scheme is shown to be roughly first-order with respect to $h$. The flux boundary condition is discretized as...
 
 $$
 \frac{T_{i,0}-T_{i,1}}{h}=0, \qquad \frac{T_{i,N-1}-T_{i,N-2}}{h}=0, \qquad \forall i
@@ -202,9 +202,15 @@ For all three residual plots, $N=41$ was used. For SOR, $\alpha=1.92$ based on w
 
 Run `homework2ei.sh` to regenerate the graph on the left. Run `homework2eii.sh` to regenerate the graph on the right.
 
-| Iteration Counts for Each Method | Iteration Counts for Different $\alpha$ |
+| | |
 |:-:|:-:|
 | ![](results_hw2e/residuals.png) | ![](results_hw2e/explore_alpha.png) |
 
 ## Problem 1f
+
+The three methods were run for $N=11,21,41,81,161$ and their computation times are plotted using a logarithmic scale. From the graph, Jacobi and Gauss-Seidel have a time complexity of roughly fourth-order, whereas SOR is roughly third-order.
+
+Run `homework2f.sh` to regenerate the graph.
+
+![](results_hw2f/times.png)
 

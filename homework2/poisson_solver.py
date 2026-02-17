@@ -28,11 +28,11 @@ def main():
         # Solve the Poisson equation using the specified method
         start_time = time.time()
         if method == 'jacobi':
-            T, k = jacobi_method(Ni, x, y, h, Q, T_initial, int(1e5), 1e-2, verbose=verbose)
+            T, k, _ = jacobi_method(Ni, x, y, h, Q, T_initial, int(1e5), 1e-2, verbose=verbose)
         elif method == 'gauss-seidel':
             if ghost_cells:
                 raise NotImplementedError("Gauss-Seidel method with ghost cells is not implemented.")
-            T, k = gauss_seidel_method(Ni, x, y, h, Q, T_initial, int(1e5), 1e-2, verbose=verbose)
+            T, k, _ = gauss_seidel_method(Ni, x, y, h, Q, T_initial, int(1e5), 1e-2, verbose=verbose)
         elif method == 'sor':
             if ghost_cells:
                 raise NotImplementedError("SOR method with ghost cells is not implemented.")
@@ -40,7 +40,7 @@ def main():
         elif method == 'multi-grid':
             if ghost_cells:
                 raise NotImplementedError("Multi-grid method with ghost cells is not implemented.")
-            T, k = multi_grid_method(Ni, x, y, h, Q, T_initial, int(1e5), alpha_i, 1e-2, verbose=verbose)
+            T, k, _ = multi_grid_method(Ni, x, y, h, Q, T_initial, int(10), 1e-2, verbose=verbose)
         end_time = time.time()
 
         # Print residuals if verbose enabled, otherwise print results
@@ -95,54 +95,8 @@ def jacobi_method(N, x, y, h, Q, T_initial, k_max, tolerance, ghost_cells=False,
         for i in range_i:
             for j in range(1, N - 1):
                 T_new[i, j] = 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - Q[i, j] * h**2)
+        
         apply_boundary_conditions(x, y, T_new, ghost_cells=ghost_cells)
-
-        res_grid = calculate_residual(N, h, Q, T_new)
-        residual = np.linalg.norm(res_grid)
-
-        if verbose:
-            print(f'{k+1}, {residual:.6e}')
-        if residual < tolerance:
-            break
-        
-        T[:] = T_new[:]
-    return T, k
-
-def gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False):
-    T = T_initial.copy()
-    T_new = T_initial.copy()
-    apply_boundary_conditions(x, y, T)
-    apply_boundary_conditions(x, y, T_new)
-
-    for k in range(k_max):
-        for i in range(1, N - 1):
-            for j in range(1, N - 1):
-                T_new[i, j] = 0.25 * (T[i+1, j] + T_new[i-1, j] + T[i, j+1] + T_new[i, j-1] - Q[i, j] * h**2)
-        apply_boundary_conditions(x, y, T_new)
-
-        res_grid = calculate_residual(N, h, Q, T_new)
-        residual = np.linalg.norm(res_grid)
-
-        if verbose:
-            print(f'{k+1}, {residual:.6e}')
-        if residual < tolerance:
-            break
-        
-        T[:] = T_new[:]
-    return T, k
-
-def sor_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose=False):
-    T = T_initial.copy()
-    T_new = T_initial.copy()
-    apply_boundary_conditions(x, y, T)
-    apply_boundary_conditions(x, y, T_new)
-
-    for k in range(k_max):
-        for i in range(1, N - 1):
-            for j in range(1, N - 1):
-                T_new[i, j] = (1 - alpha)*T[i, j] + alpha*0.25 * (T[i+1, j] + T_new[i-1, j] + T[i, j+1] + T_new[i, j-1] - Q[i, j] * h**2)
-        apply_boundary_conditions(x, y, T_new)
-
         res_grid = calculate_residual(N, h, Q, T_new)
         residual = np.linalg.norm(res_grid)
 
@@ -154,27 +108,90 @@ def sor_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose=False)
         T[:] = T_new[:]
     return T, k, res_grid
 
-def multi_grid_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose=False):
+def gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False):
+    T = T_initial.copy()
+    T_new = T_initial.copy()
+    apply_boundary_conditions(x, y, T)
+    apply_boundary_conditions(x, y, T_new)
+
     for k in range(k_max):
-        # Create coarse grid
-        N_coarse = N//2 + 1
-        (x_coarse, y_coarse), h_coarse = create_grid(N_coarse)
-        # Smoothing using SOR method with 1 iteration
-        T, k, res_fine = sor_method(N, x, y, h, Q, T_initial, int(1), alpha, 1e-2, verbose=verbose)
-        # Restriction
-        res_coarse = restriction_operator(N, N_coarse, res_fine)
-        # Adapting SOR to solve for Ae = p instead of AT = Q
-        error_coarse, _, _ = sor_method(N_coarse, x_coarse, y_coarse, h_coarse, res_coarse, np.zeros((N_coarse, N_coarse)), int(1e3), alpha, 1e-2, verbose=verbose)
-        # Prolongation
-        error_fine = prolongation_operator(N, N_coarse, error_coarse)
-        T += error_fine
-        # Print residual
-        residual = np.linalg.norm(res_fine)
+        for i in range(1, N - 1):
+            for j in range(1, N - 1):
+                T_new[i, j] = 0.25 * (T[i+1, j] + T_new[i-1, j] + T[i, j+1] + T_new[i, j-1] - Q[i, j] * h**2)
+        
+        apply_boundary_conditions(x, y, T_new)
+        res_grid = calculate_residual(N, h, Q, T_new)
+        residual = np.linalg.norm(res_grid)
+
         if verbose:
             print(f'{k+1}, {residual:.6e}')
         if residual < tolerance:
             break
-    return T, k
+        
+        T[:] = T_new[:]
+    return T, k, res_grid
+
+def sor_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose=False):
+    T = T_initial.copy()
+    T_new = T_initial.copy()
+    apply_boundary_conditions(x, y, T)
+    apply_boundary_conditions(x, y, T_new)
+
+    for k in range(k_max):
+        for i in range(1, N - 1):
+            for j in range(1, N - 1):
+                T_new[i, j] = (1 - alpha)*T[i, j] + alpha*0.25 * (T[i+1, j] + T_new[i-1, j] + T[i, j+1] + T_new[i, j-1] - Q[i, j] * h**2)
+        
+        apply_boundary_conditions(x, y, T_new)
+        res_grid = calculate_residual(N, h, Q, T_new)
+        residual = np.linalg.norm(res_grid)
+
+        if verbose:
+            print(f'{k+1}, {residual:.6e}')
+        if residual < tolerance:
+            break
+        
+        T[:] = T_new[:]
+    return T, k, res_grid
+
+def multi_grid_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False):
+    T = T_initial.copy()
+    T_new = T_initial.copy()
+    apply_boundary_conditions(x, y, T)
+    apply_boundary_conditions(x, y, T_new)
+    
+    # Create coarse grid
+    N_coarse = N//2 + 1
+    (x_coarse, y_coarse), h_coarse = create_grid(N_coarse)
+
+    for k in range(k_max):
+        # Smoothing using Gauss-Seidel method with 1 iteration
+        T_fine, _, res_fine = gauss_seidel_method(N, x, y, h, Q, T, int(1), 1e-2, verbose=False)
+
+        # Restriction
+        res_coarse = restriction_operator(N, N_coarse, res_fine)
+        print(f'res_coarse({res_coarse.shape}) =\n{res_coarse}')
+        
+        # Adapting SOR to solve for A@error = res instead of A@T = Q
+        error_coarse, iters, _ = gauss_seidel_method(N_coarse, x_coarse, y_coarse, h_coarse, res_coarse, np.zeros((N_coarse, N_coarse)), int(1e3), 1e-2, verbose=False)
+        print(f'error_coarse({error_coarse.shape}) =\n{error_coarse}')
+        
+        # Prolongation
+        error_fine = prolongation_operator(N, N_coarse, error_coarse)
+        print(f'error_fine({error_fine.shape}) =\n{error_fine}')
+        T_new = T_fine + error_fine
+
+        apply_boundary_conditions(x, y, T_new)
+        res_grid = calculate_residual(N, h, Q, T_new)
+        residual = np.linalg.norm(res_grid)
+
+        if verbose:
+            print(f'{k+1}, {iters}, {residual:.6e}')
+        if residual < tolerance:
+            break
+
+        T[:] = T_new[:]
+    return T, k, res_grid
 
 def restriction_operator(N_fine, N_coarse, res_fine):
     res_coarse = np.zeros((N_coarse, N_coarse))
@@ -185,6 +202,7 @@ def restriction_operator(N_fine, N_coarse, res_fine):
             res_fine[2:-2:2, 1:-3:2] + res_fine[2:-2:2, 3:-1:2]) +
         1 * (res_fine[1:-3:2, 1:-3:2] + res_fine[1:-3:2, 3:-1:2] + 
             res_fine[3:-1:2, 1:-3:2] + res_fine[3:-1:2, 3:-1:2])) / 16
+
     return res_coarse
 
 def prolongation_operator(N_fine, N_coarse, error_coarse):
@@ -196,6 +214,7 @@ def prolongation_operator(N_fine, N_coarse, error_coarse):
     error_fine[1::2, ::2] = 0.5 * (error_fine[:-1:2, ::2] + error_fine[2::2, ::2])
     error_fine[1::2, 1::2] = 0.25 * (error_fine[:-1:2, :-1:2] + error_fine[:-1:2, 2::2] + 
                                 error_fine[2::2, :-1:2] + error_fine[2::2, 2::2])
+
     return error_fine
 
 def apply_boundary_conditions(x, y, T, ghost_cells=False):
