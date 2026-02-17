@@ -149,7 +149,7 @@ $$
 The Jacobi method was ran until...
 
 $$
-\Vert \{T\}^{k+1} - \{T\}^k \Vert_\infty < 10^{-6}
+\Vert \{Q\} - [A]\{T\}^k \Vert_{L^2} < 10^{-2}
 $$
 
 ...using the initial condition...
@@ -164,15 +164,15 @@ $$
 \text{MAE} = \frac{1}{N^2}\sum^{N-1}_{i=0}\sum^{N-1}_{j=0}|T^{\text{numerical}}_{i,j} - T^{\text{analytical}}_{i,j}|
 $$
 
-| Grid Size: 10×10 | Grid Size: 20×20 | Grid Size: 40×40 |
+| Grid Size: 11×11 | Grid Size: 21×21 | Grid Size: 41×41 |
 |:-:|:-:|:-:|
-| ![](results_hw2c/jacobi_10.png) | ![](results_hw2c/jacobi_20.png) | ![](results_hw2c/jacobi_40.png) |
-| ![](results_hw2c/analytical_10.png) | ![](results_hw2c/analytical_20.png) | ![](results_hw2c/analytical_40.png) |
-| MAE = 2.647129e-02 | MAE = 1.188699e-02 | MAE = 5.613272e-03 |
+| ![](results_hw2c/jacobi_11.png) | ![](results_hw2c/jacobi_21.png) | ![](results_hw2c/jacobi_41.png) |
+| ![](results_hw2c/analytical_11.png) | ![](results_hw2c/analytical_21.png) | ![](results_hw2c/analytical_41.png) |
+| MAE = 2.348063e-02 | MAE = 1.124218e-02 | MAE = 5.466628e-03 |
 
 To plot the temperature along the vertical centerline, the x-coordinate of the centerline in the finite difference grid was found by taking the floor of $\frac{N}{2}$.
 
-![](results_hw2c/centerline.png)
+![](results_hw2c/jacobi_centerline.png)
 
 ## Problem 1d
 

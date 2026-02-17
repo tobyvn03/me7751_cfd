@@ -51,11 +51,13 @@ def main():
             if Ni in N[:3]:
                 ax.plot(y[:, 0], T[:, Ni//2], label=f'N={Ni}, {method.capitalize()}')
                 ax.plot(y[:, 0], T_analytical[:, Ni//2], label=f'N={Ni}, Analytical', linestyle='dashed')
+                print(f'Centerline y-index: {Ni//2}')
     
+    # Save vertical centerline plot
     if output_folder:
         ax.legend(fontsize=12)
         ax.grid(True, linestyle='--', alpha=0.7)
-        f.savefig(f'{output_folder}/centerline.png')
+        f.savefig(f'{output_folder}/{method}_centerline.png')
 
 def create_grid(N, ghost_cells=False):
     h = 1 / (N - 1)
@@ -67,11 +69,21 @@ def create_grid(N, ghost_cells=False):
         y = np.linspace(0, 1, N)
     return np.meshgrid(x, y), h
 
+def calculate_residual(N, h, Q, T):
+    res_grid = np.zeros((N, N))
+
+    for i in range(1, N - 1):
+        for j in range(1, N - 1):
+            res_grid[i, j] = Q[i, j] - (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - 4*T[i, j]) / h**2
+    residual = np.linalg.norm(res_grid)
+
+    return residual
+
 def jacobi_method(N, x, y, h, Q, T_initial, k_max, tolerance, ghost_cells=False, verbose=False):
     T = T_initial.copy()
     T_new = T_initial.copy()
     apply_boundary_conditions(x, y, T, ghost_cells=ghost_cells)
-    
+
     if ghost_cells:
         range_i = range(1, N + 1)
     else:
@@ -83,47 +95,52 @@ def jacobi_method(N, x, y, h, Q, T_initial, k_max, tolerance, ghost_cells=False,
                 T_new[i, j] = 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - Q[i, j] * h**2)
         apply_boundary_conditions(x, y, T_new, ghost_cells=ghost_cells)
 
-        diff = np.linalg.norm(T_new - T)
-        residual = np.linalg.norm(Q - (T_new[i+1, j] + T_new[i-1, j] + T_new[i, j+1] + T_new[i, j-1] - 4*T_new[i, j]) / h**2)
+        residual = calculate_residual(N, h, Q, T_new)
         if verbose:
             print(f'{k+1}, {residual:.6e}')
-        if diff < tolerance:
+        if residual < tolerance:
             break
+        
         T[:] = T_new[:]
     return T, k
 
 def gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False):
     T = T_initial.copy()
+    T_new = T_initial.copy()
     apply_boundary_conditions(x, y, T)
+
     for k in range(k_max):
         for i in range(1, N - 1):
             for j in range(1, N - 1):
-                T[i, j] = 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - Q[i, j] * h**2)
+                T_new[i, j] = 0.25 * (T[i+1, j] + T_new[i-1, j] + T[i, j+1] + T_new[i, j-1] - Q[i, j] * h**2)
         apply_boundary_conditions(x, y, T)
 
-        diff = np.linalg.norm(T - T_initial)
-        residual = np.linalg.norm(Q - (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - 4*T[i, j]) / h**2)
+        residual = calculate_residual(N, h, Q, T_new)
         if verbose:
             print(f'{k+1}, {residual:.6e}')
-        if diff < tolerance:
+        if residual < tolerance:
             break
+
+        T[:] = T_new[:]
     return T, k
 
 def sor_method(N, x, y, h, Q, T_initial, k_max, alpha, tolerance, verbose=False):
     T = T_initial.copy()
+    T_new = T_initial.copy()
     apply_boundary_conditions(x, y, T)
+
     for k in range(k_max):
         for i in range(1, N - 1):
             for j in range(1, N - 1):
                 T[i, j] = (1 - alpha) * T[i, j] + alpha * 0.25 * (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - Q[i, j] * h**2)
         apply_boundary_conditions(x, y, T)
 
-        diff = np.linalg.norm(T - T_initial)
-        residual = np.linalg.norm(Q - (T[i+1, j] + T[i-1, j] + T[i, j+1] + T[i, j-1] - 4*T[i, j]) / h**2)
+        residual = calculate_residual(N, h, Q, T_new)
         if verbose:
             print(f'{k+1}, {residual:.6e}')
-        if diff < tolerance:
+        if residual < tolerance:
             break
+        T[:] = T_new[:]
     return T, k
 
 def apply_boundary_conditions(x, y, T, ghost_cells=False):
@@ -160,7 +177,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--method', type=str, default='jacobi', choices=['jacobi', 'gauss-seidel', 'sor'], help='Iterative method to use')
     parser.add_argument('-k', '--max-iter', nargs='+', type=int, default=1000, help='Maximum number of iterations')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='Relaxation factor for SOR method')
-    parser.add_argument('-t', '--tolerance', type=float, default=1e-6, help='Tolerance for convergence')
+    parser.add_argument('-t', '--tolerance', type=float, default=1e-2, help='Tolerance for convergence')
     parser.add_argument('-g', '--ghost_cells', action='store_true', help='Use 1 ghost row on top and bottom boundaries')
     parser.add_argument('-o', '--output', type=str, default=None, help='Output folder for the plots (optional)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Print residuals at each iteration')
