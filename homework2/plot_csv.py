@@ -14,7 +14,7 @@ def plot_csv():
     plt.tick_params(labelsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
 
-    for file in file_path:
+    for file, slope_i in zip(file_path, power_law_slope):
         # Load the data
         df = pd.read_csv(file)
         
@@ -31,12 +31,12 @@ def plot_csv():
         plt.xlabel(df.columns[x_col], fontsize=14)
         plt.ylabel(df.columns[y_col], fontsize=14)
 
-    # Plot reference power law slope if provided
-    if power_law_slope is not None:
-        x_ref = np.array([x.min(), x.max()])
-        y_ref = (x_ref / x_ref[0]) ** power_law_slope * y.iloc[0]  # Scale to match first point
-        plt.plot(x_ref, y_ref, label=f'Reference slope: {power_law_slope}', linestyle='dashed')
-    plt.legend(fontsize=12)
+        # Plot reference power law slope if provided
+        if slope_i is not None:
+            x_ref = np.array([x.min(), x.max()])
+            y_ref = (x_ref / x_ref[0]) ** slope_i * y.iloc[0]  # Scale to match first point
+            plt.plot(x_ref, y_ref, label=f'Reference slope: {slope_i}', linestyle='dashed')
+        plt.legend(fontsize=12)
 
     # Save and show
     if output_filename is not None:
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('-L', '--log_y', action='store_true', help='Use log scale for y-axis')
     parser.add_argument('-o', '--output', type=str, help='Output filename for the plot (optional)')
     parser.add_argument('-n', '--num_lines', type=int, default=None, help='Number of lines to plot (default: 5)')
-    parser.add_argument('-p', '--power_law_slope', type=float, help='Reference slope to plot in log-log plot (optional)')
+    parser.add_argument('-p', '--power_law_slope', nargs='+', type=float, help='Reference slope to plot in log-log plot (optional)')
     args = parser.parse_args()
 
     x_col = args.x

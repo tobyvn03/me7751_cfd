@@ -190,11 +190,11 @@ $$
 \frac{T_{i,-1}-T_{i,1}}{2h}=0, \qquad \frac{T_{i,N}-T_{i,N-2}}{2h}=0, \qquad \forall i
 $$
 
-Here, $j=-1$ and $j=N$ represents the ghost rows above and below the domain.
+Here, $j=-1$ and $j=N$ represents the ghost rows above and below the domain. From the graph below, there is a decrease in MAE when the flux boundary condition is discretized using ghost cells.
 
-| No Ghost Cells | With Ghost Cells |
-|:-:|:-:|
-| ![](results_hw2d/errors_no_ghost.png) | ![](results_hw2d/errors_with_ghost.png) |
+Run `homework2d.sh` to regenerate the graph below.
+
+![](results_hw2d/errors.png)
 
 ## Problem 1e
 
@@ -205,3 +205,6 @@ Run `homework2ei.sh` to regenerate the graph on the left. Run `homework2eii.sh` 
 | Iteration Counts for Each Method | Iteration Counts for Different $\alpha$ |
 |:-:|:-:|
 | ![](results_hw2e/residuals.png) | ![](results_hw2e/explore_alpha.png) |
+
+## Problem 1f
+

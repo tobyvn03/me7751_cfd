@@ -1,1 +1,4 @@
-N, Method, Iterations, Time (seconds), Error (MAE)
+N, Method, Iterations, Time (seconds), Error (MAE), Alpha, h
+11, jacobi, 288, 0.032129, 2.348063e-02, 1.0, 0.1
+21, jacobi, 1271, 0.585443, 1.124218e-02, 1.0, 0.05
+41, jacobi, 5549, 8.569900, 5.466628e-03, 1.0, 0.025

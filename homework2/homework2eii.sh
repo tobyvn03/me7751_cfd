@@ -5,7 +5,7 @@ mkdir -p $RESULTS_DIR
 
 ALPHA=$RESULTS_DIR/explore_alpha.csv
 rm -f $ALPHA
-echo "N, Method, Iterations, Time (seconds), Error (MAE), Alpha" >> $ALPHA
+echo "N, Method, Iterations, Time (seconds), Error (MAE), Alpha, h" >> $ALPHA
 
 python poisson_solver.py -n 41 41 41 41 41 41 41 41 41 41 -m sor -a 1.85 1.86 1.87 1.88 1.89 1.9 1.91 1.92 1.93 1.94 >> $ALPHA
 

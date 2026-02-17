@@ -3,15 +3,14 @@
 RESULTS_DIR=results_hw2d
 mkdir -p $RESULTS_DIR
 
-OUTFILE=$RESULTS_DIR/output_no_ghost.csv
-GHOST=$RESULTS_DIR/output_with_ghost.csv
+OUTFILE=$RESULTS_DIR/without_ghost_cells.csv
+GHOST=$RESULTS_DIR/with_ghost_cells.csv
 rm -f $OUTFILE
 rm -f $GHOST
-echo "N, Method, Iterations, Time (seconds), Error (MAE)" >> $OUTFILE
-echo "N, Method, Iterations, Time (seconds), Error (MAE)" >> $GHOST
+echo "N, Method, Iterations, Time (seconds), Error (MAE), Alpha, h" >> $OUTFILE
+echo "N, Method, Iterations, Time (seconds), Error (MAE), Alpha, h" >> $GHOST
 
-python poisson_solver.py -n 10 20 40 80 160 -m jacobi -k 1000 2000 6000 24000 96000 -t 1e-6 -o $RESULTS_DIR >> $OUTFILE
-python poisson_solver.py -n 10 20 40 80 160 -m jacobi -k 1000 2000 6000 24000 96000 -t 1e-6 -g -o $RESULTS_DIR >> $GHOST
+python poisson_solver.py -n 161 81 41 21 11 -m jacobi -a 1.0 1.0 1.0 1.0 1.0 >> $OUTFILE
+python poisson_solver.py -n 161 81 41 21 11 -m jacobi -a 1.0 1.0 1.0 1.0 1.0 -g >> $GHOST
 
-python plot_csv.py -i $OUTFILE -x 0 -y 4 -n 5 -t "Mean Absolute Error vs. Grid Size: No Ghost Cells" -o "$RESULTS_DIR/errors_no_ghost.png" -l
-python plot_csv.py -i $GHOST -x 0 -y 4 -n 5 -t "Mean Absolute Error vs. Grid Size: Using Ghost Cells" -o "$RESULTS_DIR/errors_with_ghost.png" -l
+python plot_csv.py -i $OUTFILE $GHOST -x 6 -y 4 -t "Mean Absolute Error vs. Grid Size" -o "$RESULTS_DIR/errors.png" -L -l -p 1.1 1.1

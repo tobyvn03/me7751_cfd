@@ -1,0 +1,6 @@
+N, Method, Iterations, Time (seconds), Error (MAE), Alpha, h
+11, gauss-seidel, 154, 0.011564, 2.347519e-02, 1.0, 0.1
+21, gauss-seidel, 657, 0.198841, 1.124075e-02, 1.0, 0.05
+41, gauss-seidel, 2820, 3.589376, 5.466273e-03, 1.0, 0.025
+81, gauss-seidel, 12103, 66.282897, 2.691921e-03, 1.0, 0.00125
+161, gauss-seidel, 51847, 1119.477627, 1.335402e-03, 1.0, 0.000625
