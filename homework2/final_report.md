@@ -164,6 +164,8 @@ $$
 \text{MAE} = \frac{1}{N^2}\sum^{N-1}_{i=0}\sum^{N-1}_{j=0}|T^{\text{numerical}}_{i,j} - T^{\text{analytical}}_{i,j}|
 $$
 
+Run `homework2c.sh` to regenerate all graphs used.
+
 | Grid Size: 11×11 | Grid Size: 21×21 | Grid Size: 41×41 |
 |:-:|:-:|:-:|
 | ![](results_hw2c/jacobi_11.png) | ![](results_hw2c/jacobi_21.png) | ![](results_hw2c/jacobi_41.png) |
@@ -196,4 +198,10 @@ Here, $j=-1$ and $j=N$ represents the ghost rows above and below the domain.
 
 ## Problem 1e
 
-![](results_hw2e/residuals.png)
+For all three residual plots, $N=41$ was used. For SOR, $\alpha=1.92$ based on which relaxation factor resulted in the least number of iterations.
+
+Run `homework2ei.sh` to regenerate the graph on the left. Run `homework2eii.sh` to regenerate the graph on the right.
+
+| Iteration Counts for Each Method | Iteration Counts for Different $\alpha$ |
+|:-:|:-:|
+| ![](results_hw2e/residuals.png) | ![](results_hw2e/explore_alpha.png) |

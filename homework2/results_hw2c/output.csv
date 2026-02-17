@@ -1,7 +1,1 @@
 N, Method, Iterations, Time (seconds), Error (MAE)
-11, jacobi, 288, 0.023993, 2.348063e-02
-Centerline y-index: 5
-21, jacobi, 1271, 0.395711, 1.124218e-02
-Centerline y-index: 10
-41, jacobi, 5549, 7.084417, 5.466628e-03
-Centerline y-index: 20
