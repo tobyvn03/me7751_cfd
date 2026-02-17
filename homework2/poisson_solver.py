@@ -40,7 +40,7 @@ def main():
         elif method == 'multi-grid':
             if ghost_cells:
                 raise NotImplementedError("Multi-grid method with ghost cells is not implemented.")
-            T, k, _ = multi_grid_method(Ni, x, y, h, Q, T_initial, int(10), 1e-2, verbose=verbose)
+            T, k, _ = multi_grid_method(Ni, x, y, h, Q, T_initial, int(1e5), 5e-2, verbose=verbose)
         end_time = time.time()
 
         # Print residuals if verbose enabled, otherwise print results
@@ -108,18 +108,34 @@ def jacobi_method(N, x, y, h, Q, T_initial, k_max, tolerance, ghost_cells=False,
         T[:] = T_new[:]
     return T, k, res_grid
 
-def gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False):
+def gauss_seidel_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False, apply_bc=True):
     T = T_initial.copy()
     T_new = T_initial.copy()
-    apply_boundary_conditions(x, y, T)
-    apply_boundary_conditions(x, y, T_new)
+    if apply_bc:
+        apply_boundary_conditions(x, y, T)
+        apply_boundary_conditions(x, y, T_new)
+    else:
+        T[0, :] = 0
+        T[-1, :] = 0
+        T[:, 0] = 0
+        T[:, -1] = 0
+        T_new[0, :] = 0
+        T_new[-1, :] = 0
+        T_new[:, 0] = 0
+        T_new[:, -1] = 0
 
     for k in range(k_max):
         for i in range(1, N - 1):
             for j in range(1, N - 1):
                 T_new[i, j] = 0.25 * (T[i+1, j] + T_new[i-1, j] + T[i, j+1] + T_new[i, j-1] - Q[i, j] * h**2)
         
-        apply_boundary_conditions(x, y, T_new)
+        if apply_bc:
+            apply_boundary_conditions(x, y, T_new)
+        else:
+            T_new[0, :] = 0
+            T_new[-1, :] = 0
+            T_new[:, 0] = 0
+            T_new[:, -1] = 0
         res_grid = calculate_residual(N, h, Q, T_new)
         residual = np.linalg.norm(res_grid)
 
@@ -170,15 +186,12 @@ def multi_grid_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False)
 
         # Restriction
         res_coarse = restriction_operator(N, N_coarse, res_fine)
-        print(f'res_coarse({res_coarse.shape}) =\n{res_coarse}')
         
         # Adapting SOR to solve for A@error = res instead of A@T = Q
-        error_coarse, iters, _ = gauss_seidel_method(N_coarse, x_coarse, y_coarse, h_coarse, res_coarse, np.zeros((N_coarse, N_coarse)), int(1e3), 1e-2, verbose=False)
-        print(f'error_coarse({error_coarse.shape}) =\n{error_coarse}')
+        error_coarse, iters, _ = gauss_seidel_method(N_coarse, x_coarse, y_coarse, h_coarse, res_coarse, np.zeros((N_coarse, N_coarse)), int(1e3), 1e-2, verbose=False, apply_bc=False)
         
         # Prolongation
         error_fine = prolongation_operator(N, N_coarse, error_coarse)
-        print(f'error_fine({error_fine.shape}) =\n{error_fine}')
         T_new = T_fine + error_fine
 
         apply_boundary_conditions(x, y, T_new)
@@ -187,10 +200,11 @@ def multi_grid_method(N, x, y, h, Q, T_initial, k_max, tolerance, verbose=False)
 
         if verbose:
             print(f'{k+1}, {iters}, {residual:.6e}')
+        
+        T[:] = T_new[:]
+        
         if residual < tolerance:
             break
-
-        T[:] = T_new[:]
     return T, k, res_grid
 
 def restriction_operator(N_fine, N_coarse, res_fine):

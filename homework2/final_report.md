@@ -210,7 +210,14 @@ Run `homework2ei.sh` to regenerate the graph on the left. Run `homework2eii.sh` 
 
 The three methods were run for $N=11,21,41,81,161$ and their computation times are plotted using a logarithmic scale. From the graph, Jacobi and Gauss-Seidel have a time complexity of roughly fourth-order, whereas SOR is roughly third-order.
 
-Run `homework2f.sh` to regenerate the graph.
+Run `homework2fg.sh` to regenerate the graph.
 
-![](results_hw2f/times.png)
+![](results_hw2f/times_ref_slopes.png)
 
+## Problem 1g
+
+A two-level multi-grid method was also developed and tested against the other three methods. With a looser tolerance of $\rho^k < 5\times 10^{-2}$, the multi-grid method has a time complexity similar to that of the Jacobi and Gauss-Seidel methods.
+
+Run `homework2fg.sh` to regenerate the graph.
+
+![](results_hw2f/times_no_slopes.png)

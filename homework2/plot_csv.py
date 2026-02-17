@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import math
 
 def plot_csv():
     # Create and format the plot
@@ -32,7 +33,7 @@ def plot_csv():
         plt.ylabel(df.columns[y_col], fontsize=14)
 
         # Plot reference power law slope if provided
-        if slope_i is not None:
+        if not(math.isnan(slope_i)):
             x_ref = np.array([x.min(), x.max()])
             y_ref = (x_ref / x_ref[0]) ** slope_i * y.iloc[0]  # Scale to match first point
             plt.plot(x_ref, y_ref, label=f'Reference slope: {slope_i}', linestyle='dashed')
