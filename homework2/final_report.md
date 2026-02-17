@@ -166,13 +166,34 @@ $$
 
 | Grid Size: 10×10 | Grid Size: 20×20 | Grid Size: 40×40 |
 |:-:|:-:|:-:|
-| ![](results/jacobi_solution_10.png) | ![](results/jacobi_solution_20.png) | ![](results/jacobi_solution_40.png) |
-| ![](results/analytical_solution_10.png) | ![](results/analytical_solution_20.png) | ![](results/analytical_solution_40.png) |
+| ![](results_hw2c/jacobi_10.png) | ![](results_hw2c/jacobi_20.png) | ![](results_hw2c/jacobi_40.png) |
+| ![](results_hw2c/analytical_10.png) | ![](results_hw2c/analytical_20.png) | ![](results_hw2c/analytical_40.png) |
 | MAE = 2.647129e-02 | MAE = 1.188699e-02 | MAE = 5.613272e-03 |
 
 To plot the temperature along the vertical centerline, the x-coordinate of the centerline in the finite difference grid was found by taking the floor of $\frac{N}{2}$.
 
-![](results/jacobi_centerline_2c.png)
+![](results_hw2c/centerline.png)
 
 ## Problem 1d
 
+The spatial convergence rate of the finite difference scheme can be modeled by a power law of roughly first-order with respect to $N$. In this plot, the flux boundary condition is discretized as...
+
+$$
+\frac{T_{i,0}-T_{i,1}}{h}=0, \qquad \frac{T_{i,N-1}-T_{i,N-2}}{h}=0, \qquad \forall i
+$$
+
+This can be improved, however, by using ghost rows across the top and bottom boundaries of the domain and changing the discretization of the flux boundary condition.
+
+$$
+\frac{T_{i,-1}-T_{i,1}}{2h}=0, \qquad \frac{T_{i,N}-T_{i,N-2}}{2h}=0, \qquad \forall i
+$$
+
+Here, $j=-1$ and $j=N$ represents the ghost rows above and below the domain.
+
+| No Ghost Cells | With Ghost Cells |
+|:-:|:-:|
+| ![](results_hw2d/errors_no_ghost.png) | ![](results_hw2d/errors_with_ghost.png) |
+
+## Problem 1e
+
+![](results_hw2e/residuals.png)
