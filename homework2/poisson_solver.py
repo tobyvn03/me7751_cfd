@@ -261,12 +261,12 @@ def plot_solution(x, y, T, method, output_file=None):
 if __name__ == '__main__':
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Poisson solver")
-    parser.add_argument('-n', nargs='+', type=int, default=10, help='Number of grid points')
+    parser.add_argument('-n', nargs='+', type=int, help='Number of grid points (multiple N allowed for multiple runs)')
     parser.add_argument('-m', '--method', type=str, default='jacobi', choices=['jacobi', 'gauss-seidel', 'sor', 'multi-grid'], help='Iterative method to use')
-    parser.add_argument('-a', '--alpha', nargs='+', type=float, default=1.0, help='Relaxation factor for SOR method')
-    parser.add_argument('-g', '--ghost_cells', action='store_true', help='Use 1 ghost row on top and bottom boundaries')
+    parser.add_argument('-a', '--alpha', nargs='+', type=float, help='Relaxation factor for SOR method (required for all methods, multiple alpha allowed for multiple runs)')
+    parser.add_argument('-g', '--ghost_cells', action='store_true', help='Use 1 ghost row on top and bottom boundaries (changes the flux discretization)')
     parser.add_argument('-o', '--output', type=str, default=None, help='Output folder for the plots (optional)')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Print residuals at each iteration')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Print residuals at each iteration instead of summary results')
     args = parser.parse_args()
 
     # Extract parameters from arguments
