@@ -8,7 +8,7 @@ import os
 """
 File:   scalar_transport.py
 Author: Toby Viet Nguyen
-Desc:   This script solves the 1-D unsteady transport equation ∂φ/∂t + U ∂φ/∂x = ∂/∂x (Γ ∂φ/∂x)
+Desc:   This script solves the 1-D unsteady transport equation ∂ϕ/∂t + U ∂ϕ/∂x = ∂/∂x (Γ ∂ϕ/∂x)
         given constant U, Γ using an explicit, implicit, and Crank-Nicolson scheme.
 """
 
@@ -16,24 +16,24 @@ def main():
     figure, axes = plt.subplots(figsize=(8, 6))
     axes.set_title(plot_title, fontsize=16)
     axes.set_xlabel('x', fontsize=14)
-    axes.set_ylabel('\phi', fontsize=14)
+    axes.set_ylabel('ϕ', fontsize=14)
     axes.tick_params(labelsize=12)
-    with open(output_file, 'w') as file_out:
-        file_out.write('N, U, G, tf, ti, dt, scheme, CFL, MAE, Time\n')
+    with open(parameters, 'w') as file_out:
+        file_out.write('trial,N,U,G,tf,ti,dt,scheme,h,CFL,Diffusion,MAE,Time\n')
     
     for trial, N, U, G, tf, ti, dt, scheme in zip(trial_ids, N_values, U_values, G_values, tf_values, ti_values, dt_values, schemes):
-        # Create grid and compute source term Q and T_initial
+        # Create grid and compute initial solution
         x, h = create_grid(N)
         phi_initial = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-10)**2)
 
-        # Solve the Poisson equation using the specified method
+        # Solve the transport equation using the specified scheme
         start_time = time.time()
         if scheme == 'explicit':
-            phi_numerical = explicit_scheme(N, phi_initial, U, G, dt, tf-ti, h)
+            phi_numerical, c, d = explicit_scheme(N, phi_initial, U, G, dt, tf, ti, h)
         elif scheme == 'implicit':
-            phi_numerical = implicit_scheme(N, phi_initial, U, G, dt, tf-ti, h)
+            phi_numerical, c, d = implicit_scheme(N, phi_initial, U, G, dt, tf, ti, h)
         elif scheme == 'crank-nicolson':
-            phi_numerical = crank_nicolson_scheme(N, phi_initial, U, G, dt, tf-ti, h)
+            phi_numerical, c, d = crank_nicolson_scheme(N, phi_initial, U, G, dt, tf, ti, h)
         end_time = time.time()
 
         # Compute analytical solution and MAE
@@ -45,52 +45,80 @@ def main():
             mae = np.mean(np.abs(phi_analytical - phi_numerical))
     
         # Write results to output plot and file
-        axes.plot(x, phi_numerical, label=f"Trial {trial}")
-        with open(output_file, 'a') as file_out:
-            file_out.write(f"{N}, {U}, {G}, {tf}, {ti}, {dt}, {scheme}, {U*dt/h}, {mae}, {end_time - start_time}\n")
+        axes.plot(x, phi_numerical, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
+        axes.plot(x, phi_analytical, '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        with open(parameters, 'a') as file_out:
+            file_out.write(f"{trial},{N},{U},{G},{tf},{ti},{dt},{scheme},{h},{c},{d},{mae},{end_time - start_time}\n")
+
+    figure.legend()
+    figure.savefig(plot_file)
 
 def create_grid(N):
     h = 1 / (N - 1)
     x = np.linspace(5, 45, N)
     return x, h
 
-def explicit_scheme(N, phi, U, G, dt, T, h):
-    for _ in range(int(T/dt)):
-        phi_new = np.copy(phi)
-        for i in range(1, N-1):
-            phi_new[i] = phi[i] - U * (phi[i] - phi[i-1]) * dt / h + G * (phi[i+1] - 2*phi[i] + phi[i-1]) * dt / h**2
-        phi = phi_new
-    return phi_new
+def explicit_scheme(N, phi_initial, U, G, dt, tf, ti, h):
+    c = U * dt / h
+    d = G * dt / h**2
+    if c > 1 or d > 0.5:
+        print(f"Warning: Stability condition violated for explicit scheme (CFL={c:.2f}, Diffusion number={d:.2f})")
+    
+    phi = phi_initial.copy()
+    phi_new = phi_initial.copy()
+    apply_boundary_conditions(phi)
 
-def implicit_scheme(N, phi, U, G, dt, T, h):
-    aW = -U * dt / h - G * dt / h**2
-    aP = 1 + 2 * G * dt / h**2
-    aE = G * dt / h**2
-    b = phi.copy()
-    for _ in range(int(T/dt)):
+    for t_step in range(int((tf-ti)/dt)):
         for i in range(1, N-1):
-            b[i] = phi[i]
+            phi_new[i] = phi[i] - c/2 * (phi[i+1] - phi[i-1]) + d * (phi[i+1] - 2*phi[i] + phi[i-1])
+        apply_boundary_conditions(phi_new)
+        print(f't = {ti + (t_step+1)*dt}, max(ϕ) = {np.max(phi_new)}')
+        phi = phi_new
+    return phi_new, c, d
+
+def implicit_scheme(N, phi_initial, U, G, dt, tf, ti, h):
+    c = U * dt / h
+    d = G * dt / h**2
+    aW = (-c/2 - d) * np.ones(N)
+    aP = (1 + 2*d) * np.ones(N)
+    aE = (c/2 - d) * np.ones(N)
+
+    phi = phi_initial.copy()
+    phi_new = phi_initial.copy()
+    apply_boundary_conditions(phi)
+    apply_boundary_conditions(aW)
+    apply_boundary_conditions(aP, value=1.0)
+    apply_boundary_conditions(aE)
+
+    for i in range(1, N):
+        aP[i] -= aW[i] * aE[i-1] / aP[i-1]
+
+    for t_step in range(int((tf-ti)/dt)):
+        phi_new = thomas_algorithm(N, aW, aP, aE, phi)
+        apply_boundary_conditions(phi_new)
+        print(f't = {ti + (t_step+1)*dt}, max(ϕ) = {phi_new}')
+        phi = phi_new
+    return phi_new, c, d
+
+def crank_nicolson_scheme(N, phi_initial, U, G, dt, tf, ti, h):
+    c = U * dt / h
+    d = G * dt / h**2
+    aW = (-c/4 - d/2) * np.ones(N)
+    aP = (1 + d) * np.ones(N)
+    aE = (c/4 - d/2) * np.ones(N)
+    b = phi.copy()
+    for _ in range(int((tf-ti)/dt)):
+        for i in range(1, N-1):
+            b[i] = (c/4 + d/2) * phi[i-1] + (1 - d) * phi[i] + (-c/4 + d/2) * phi[i+1]
         phi_new = thomas_algorithm(N, aW, aP, aE, b)
         phi = phi_new
-    return phi_new
-
-def crank_nicolson_scheme(N, phi, U, G, dt, T, h):
-    aW = -0.5 * U * dt / h - 0.5 * G * dt / h**2
-    aP = 1 + G * dt / h**2
-    aE = 0.5 * G * dt / h**2
-    b = phi.copy()
-    for _ in range(int(T/dt)):
-        for i in range(1, N-1):
-            b[i] += 0.5 * U * (phi[i+1] - phi[i-1]) * dt / h - 0.5 * G * (phi[i+1] - 2*phi[i] + phi[i-1]) * dt / h**2
-        phi_new = thomas_algorithm(N, aW, aP, aE, b)
-        phi = phi_new
-    return phi_new
+    return phi_new, c, d
 
 def thomas_algorithm(N, aW, aP, aE, b):
     # Forward substitution for TDMA
     for i in range(1, N):
-        aP[i] -= aW[i] * aE[i-1] / aP[i-1]
         b[i] -= aW[i] * b[i-1] / aP[i-1]
+    
     # Backward substitution for TDMA
     phi = np.zeros(N)
     phi[-1] = b[-1] / aP[-1]
@@ -98,29 +126,31 @@ def thomas_algorithm(N, aW, aP, aE, b):
         phi[i] = (b[i] - aE[i] * phi[i+1]) / aP[i]
     return phi
 
+def apply_boundary_conditions(phi, value=0.0):
+    phi[0] = value
+    phi[-1] = value
+
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Poisson solver")
-    parser.add_argument('-i', '--input_file', type=str, default=None, help='Input .csv file with parameters and trials')
-    parser.add_argument('-o', '--output_file', type=str, default=None, help='Output .csv file with results and MAE for each trial')
+    parser.add_argument('parameters', type=str, default=None, help='Input .csv file with parameters and trials')
     parser.add_argument('-x', '--plot_x', nargs='+', type=float, help='X values for plotting')
     parser.add_argument('-t', '--plot_t', nargs='+', type=float, help='T values for plotting')
-    parser.add_argument('-f', '--base_folder', type=str, default='./', help='Base folder for input, output, and plots (optional)')
+    parser.add_argument('-d', '--base_directory', type=str, default='./', help='Base folder for trials (optional)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Print verbose output for debugging')
     args = parser.parse_args()
 
     # Extract parameters from arguments
-    base_folder = args.base_folder
-    input_file = args.input_file
-    input_file = os.path.join(base_folder, input_file)
-    output_file = args.output_file
-    output_file = os.path.join(base_folder, output_file)
+    base_directory = args.base_directory
+    parameters = args.parameters
+    parameters = os.path.join(base_directory, parameters)
 
     # Use output_file as plot title and plot file
-    plot_title = output_file.split('/')[-1].replace('.csv', '').split('_')[1:].replace('_', ' ').title()
-    plot_file = output_file.replace('.csv', '.png')
+    plot_title = parameters.split('/')[-1].replace('.csv', '').replace('_', ' ').title()
+    plot_file = parameters.replace('.csv', '.png')
 
-    df = pd.read_csv(input_file)
+    df = pd.read_csv(parameters)
+    print(df)
     trial_ids = df['trial'].tolist()
     N_values = df['N'].tolist()
     U_values = df['U'].tolist()

@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python scalar_transport.py -i input_explicit_case_1.csv -o output_explicit_case_1.csv -f part2
+python scalar_transport.py explicit_case_1.csv -d part2

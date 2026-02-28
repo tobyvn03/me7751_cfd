@@ -1,4 +1,0 @@
-trial, N, U, G, tf, ti, dt, scheme
-1, 200, 1, 0.01, 20, 0.1, explicit
-2, 200, 1, 0.01, 30, 0.1, explicit
-3, 200, 1, 0.01, 40, 0.1, explicit
