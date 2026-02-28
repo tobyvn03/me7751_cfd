@@ -1,7 +1,9 @@
 import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 import argparse
 import time
+import os
 
 """
 File:   scalar_transport.py
@@ -11,96 +13,125 @@ Desc:   This script solves the 1-D unsteady transport equation ∂φ/∂t + U �
 """
 
 def main():
-    # Plot vertical centerline results
-    if plots_folder:
-        f, ax = plt.subplots(figsize=(8, 6))
-        ax.set_title(f'Centerline Temperature Distribution: {method.capitalize()} vs. Analytical', fontsize=16)
-        ax.set_xlabel('y', fontsize=14)
-        ax.set_ylabel('Temperature', fontsize=14)
-        ax.tick_params(labelsize=12)
-
-    for N_i, U_i, G_i, t_final_i, t_start_i, dt_i in zip(N, U, G, t_final, t_start, dt):
+    figure, axes = plt.subplots(figsize=(8, 6))
+    axes.set_title(plot_title, fontsize=16)
+    axes.set_xlabel('x', fontsize=14)
+    axes.set_ylabel('\phi', fontsize=14)
+    axes.tick_params(labelsize=12)
+    with open(output_file, 'w') as file_out:
+        file_out.write('N, U, G, tf, ti, dt, scheme, CFL, MAE, Time\n')
+    
+    for trial, N, U, G, tf, ti, dt, scheme in zip(trial_ids, N_values, U_values, G_values, tf_values, ti_values, dt_values, schemes):
         # Create grid and compute source term Q and T_initial
-        x, h = create_grid(N_i)
+        x, h = create_grid(N)
         phi_initial = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-10)**2)
 
         # Solve the Poisson equation using the specified method
         start_time = time.time()
-        if method == 'jacobi':
-            T, k, _ = jacobi_method(Ni, x, y, h, Q, T_initial, int(1e5), 1e-2, verbose=verbose)
-        elif method == 'gauss-seidel':
-            if ghost_cells:
-                raise NotImplementedError("Gauss-Seidel method with ghost cells is not implemented.")
-            T, k, _ = gauss_seidel_method(Ni, x, y, h, Q, T_initial, int(1e5), 1e-2, verbose=verbose)
-        elif method == 'sor':
-            if ghost_cells:
-                raise NotImplementedError("SOR method with ghost cells is not implemented.")
-            T, k, _ = sor_method(Ni, x, y, h, Q, T_initial, int(1e5), alpha_i, 1e-2, verbose=verbose)
-        elif method == 'multi-grid':
-            if ghost_cells:
-                raise NotImplementedError("Multi-grid method with ghost cells is not implemented.")
-            T, k, _ = multi_grid_method(Ni, x, y, h, Q, T_initial, int(1e5), 5e-2, verbose=verbose)
+        if scheme == 'explicit':
+            phi_numerical = explicit_scheme(N, phi_initial, U, G, dt, tf-ti, h)
+        elif scheme == 'implicit':
+            phi_numerical = implicit_scheme(N, phi_initial, U, G, dt, tf-ti, h)
+        elif scheme == 'crank-nicolson':
+            phi_numerical = crank_nicolson_scheme(N, phi_initial, U, G, dt, tf-ti, h)
         end_time = time.time()
 
         # Compute analytical solution and MAE
-        if U_i == 1 and G_i == 0.01:
-            phi_analytical = (4*np.pi*G_i*t_final_i)**(-0.5) * np.exp(-(x-U_i*t_final_i)**2/(4*G_i*t_final_i))
-            mae = np.mean(np.abs(phi_analytical - phi_initial)) # TODO replace phi_initial with numerical solution at t_final_i
-        if U_i == 1 and G_i == 0:
-            phi_analytical = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-U_i*t_final_i)**2)
-
-        # Plot contour results
-        if plots_folder:
-            plot_solution(x, y, T, method.capitalize(), output_file=f'{plots_folder}/{method}_{Ni}.png')
-            plot_solution(x, y, T_analytical, 'Analytical', output_file=f'{plots_folder}/analytical_{Ni}.png')
-            # Plot centerline for the first 3 grid sizes
-            if Ni in N[:3]:
-                ax.plot(y[:, 0], T[:, Ni//2], label=f'N={Ni}, {method.capitalize()}')
-                ax.plot(y[:, 0], T_analytical[:, Ni//2], label=f'N={Ni}, Analytical', linestyle='dashed')
+        if U == 1 and G == 0.01:
+            phi_analytical = (4*np.pi*G*tf)**(-0.5) * np.exp(-(x-U*tf)**2/(4*G*tf))
+            mae = np.mean(np.abs(phi_analytical - phi_numerical))
+        elif U == 1 and G == 0:
+            phi_analytical = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-U*tf)**2)
+            mae = np.mean(np.abs(phi_analytical - phi_numerical))
     
-    # Save vertical centerline plot
-    if plots_folder:
-        ax.legend(fontsize=12)
-        ax.grid(True, linestyle='--', alpha=0.7)
-        f.savefig(f'{plots_folder}/{method}_centerline.png')
+        # Write results to output plot and file
+        axes.plot(x, phi_numerical, label=f"Trial {trial}")
+        with open(output_file, 'a') as file_out:
+            file_out.write(f"{N}, {U}, {G}, {tf}, {ti}, {dt}, {scheme}, {U*dt/h}, {mae}, {end_time - start_time}\n")
 
 def create_grid(N):
     h = 1 / (N - 1)
-    x = np.linspace(0, 1, N)
+    x = np.linspace(5, 45, N)
     return x, h
 
+def explicit_scheme(N, phi, U, G, dt, T, h):
+    for _ in range(int(T/dt)):
+        phi_new = np.copy(phi)
+        for i in range(1, N-1):
+            phi_new[i] = phi[i] - U * (phi[i] - phi[i-1]) * dt / h + G * (phi[i+1] - 2*phi[i] + phi[i-1]) * dt / h**2
+        phi = phi_new
+    return phi_new
 
+def implicit_scheme(N, phi, U, G, dt, T, h):
+    aW = -U * dt / h - G * dt / h**2
+    aP = 1 + 2 * G * dt / h**2
+    aE = G * dt / h**2
+    b = phi.copy()
+    for _ in range(int(T/dt)):
+        for i in range(1, N-1):
+            b[i] = phi[i]
+        phi_new = thomas_algorithm(N, aW, aP, aE, b)
+        phi = phi_new
+    return phi_new
+
+def crank_nicolson_scheme(N, phi, U, G, dt, T, h):
+    aW = -0.5 * U * dt / h - 0.5 * G * dt / h**2
+    aP = 1 + G * dt / h**2
+    aE = 0.5 * G * dt / h**2
+    b = phi.copy()
+    for _ in range(int(T/dt)):
+        for i in range(1, N-1):
+            b[i] += 0.5 * U * (phi[i+1] - phi[i-1]) * dt / h - 0.5 * G * (phi[i+1] - 2*phi[i] + phi[i-1]) * dt / h**2
+        phi_new = thomas_algorithm(N, aW, aP, aE, b)
+        phi = phi_new
+    return phi_new
+
+def thomas_algorithm(N, aW, aP, aE, b):
+    # Forward substitution for TDMA
+    for i in range(1, N):
+        aP[i] -= aW[i] * aE[i-1] / aP[i-1]
+        b[i] -= aW[i] * b[i-1] / aP[i-1]
+    # Backward substitution for TDMA
+    phi = np.zeros(N)
+    phi[-1] = b[-1] / aP[-1]
+    for i in reversed(range(0, N-1)):
+        phi[i] = (b[i] - aE[i] * phi[i+1]) / aP[i]
+    return phi
 
 if __name__ == "__main__":
-    # Parse command-line arguments for simulation
+    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Poisson solver")
-    parser.add_argument('-n', '--number_grid_points', nargs='+', type=int, help='Number of grid points')
-    parser.add_argument('-u', '--advective_velocity', nargs='+', type=float, default=1.0, help='Advection velocity U')
-    parser.add_argument('-g', '--diffusivity', nargs='+', type=float, default=0.01, help='Diffusivity Γ')
-    parser.add_argument('-T', '--final_time', nargs='+', type=float, default=40.0, help='Final time for unsteady simulation')
-    parser.add_argument('-t', '--start_time', nargs='+', type=float, default=10.0, help='Start time for unsteady simulation')
-    parser.add_argument('-d', '--time_step', nargs='+', type=float, default=0.01, help='Time step for unsteady simulation')
-    parser.add_argument('-s', '--scheme', nargs='+', type=str, default='explicit', choices=['explicit', 'implicit', 'crank-nicolson'], help='Explicit, implicit, or Crank-Nicolson scheme')
-
-    # Parse command-line arguments for plotting
-    parser.add_argument('--plot_x', nargs='+', type=float, help='X values for plotting')
-    parser.add_argument('--plot_t', nargs='+', type=float, help='T values for plotting')
-    parser.add_argument('-o', '--output', type=str, default=None, help='Output folder for the plots (optional)')
+    parser.add_argument('-i', '--input_file', type=str, default=None, help='Input .csv file with parameters and trials')
+    parser.add_argument('-o', '--output_file', type=str, default=None, help='Output .csv file with results and MAE for each trial')
+    parser.add_argument('-x', '--plot_x', nargs='+', type=float, help='X values for plotting')
+    parser.add_argument('-t', '--plot_t', nargs='+', type=float, help='T values for plotting')
+    parser.add_argument('-f', '--base_folder', type=str, default='./', help='Base folder for input, output, and plots (optional)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Print verbose output for debugging')
     args = parser.parse_args()
 
     # Extract parameters from arguments
-    N = args.number_grid_points
-    U = args.advective_velocity
-    G = args.diffusivity
-    t_final = args.final_time
-    t_start = args.start_time
-    dt = args.time_step
-    scheme = str(args.scheme)
-    
+    base_folder = args.base_folder
+    input_file = args.input_file
+    input_file = os.path.join(base_folder, input_file)
+    output_file = args.output_file
+    output_file = os.path.join(base_folder, output_file)
+
+    # Use output_file as plot title and plot file
+    plot_title = output_file.split('/')[-1].replace('.csv', '').split('_')[1:].replace('_', ' ').title()
+    plot_file = output_file.replace('.csv', '.png')
+
+    df = pd.read_csv(input_file)
+    trial_ids = df['trial'].tolist()
+    N_values = df['N'].tolist()
+    U_values = df['U'].tolist()
+    G_values = df['G'].tolist()
+    tf_values = df['tf'].tolist()
+    ti_values = df['ti'].tolist()
+    dt_values = df['dt'].tolist()
+    schemes = df['scheme'].tolist()
+
     plot_x = args.plot_x
     plot_t = args.plot_t
-    plots_folder = args.output
     verbose = args.verbose
 
     main()
