@@ -1,0 +1,6 @@
+trial,N,U,G,tf,ti,dt,scheme
+1,401,1,0.01,40,10,0.001,crank-nicolson
+2,801,1,0.01,40,10,0.001,crank-nicolson
+3,1601,1,0.01,40,10,0.001,crank-nicolson
+4,3201,1,0.01,40,10,0.001,crank-nicolson
+5,6401,1,0.01,40,10,0.001,crank-nicolson
