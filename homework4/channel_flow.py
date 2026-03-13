@@ -14,63 +14,77 @@ Desc:   This script solves the 2-D steady-state channel flow of a viscous, incom
 """
 
 def main():
+    # Initialize plot settings
+    figure, axes = plt.subplots(figsize=(5, 4))
+    axes.set_ylabel('y', fontsize=12)
+    axes.tick_params(labelsize=12)
+    axes.set_xlabel('u', fontsize=12)
+    
     # Write header to output file
     with open(output_file, 'w') as file_out:
-        file_out.write('trial,Nx,Ny,dx,dy,U0,dt,tf,beta,Ma,Re,MAE,Time\n')
+        file_out.write('trial,Nx,Ny,L,H,U0,P0,dt,tf,beta,nu,plot_x,dx,dy,Re,Ma,CFL,MAE,Time\n')
     
-    for trial, N, U, G, tf, ti, dt, scheme in zip(trial_ids, N_values, U_values, G_values, tf_values, ti_values, dt_values, schemes):
-        # Create grid and initialize solution
+    for trial, Nx, Ny, L, H, u_inlet, p_inlet, dt, t_final, beta, nu, plot_x in zip(trial_ids, Nx_values, Ny_values, L_values, H_values, U_values, P_values, dt_values, tf_values, beta_values, nu_values, plot_x_values):
+        # Create grid with ghost cells
         (x, y), dx, dy = create_grid(Nx, L, Ny, H, ghost_cells=True)
-        p = np.zeros((Nx, Ny))
-        u = u_inlet * np.ones((Nx, Ny))
-        v = np.zeros((Nx, Ny))
-        inv_Re = mu / rho / u_inlet / H
+
+        # Initialize solution with ghost cells
+        inv_Re = nu / u_inlet / H
+        p = np.zeros((Ny, Nx + 1))
+        u = u_inlet * np.ones((Ny, Nx + 1))
+        v = np.zeros((Ny, Nx + 1))
+
+        # Apply initial boundary conditions
+        apply_boundary_conditions(p, u, v, p_inlet, u_inlet, 0.0)
 
         # Solve the governing equations using the explicit scheme
+        t = 0
         start_time = time.time()
         while t < t_final:
             # Compute spatial derivatives with central differences
             dE1_dx, dE2_dx, dE3_dx = d_dx(u/beta, p+u**2, u*v, dx)
             dF1_dy, dF2_dy, dF3_dy = d_dy(v/beta, u*v, p+v**2, dy)
-            d2DU1_dx2, d2DU2_dx2, d2DU3_dx2 = d2_dx2(0, u, v, dx)
-            d2DU1_dy2, d2DU2_dy2, d2DU3_dy2 = d2_dx2(0, u, v, dy)
+            d2DU1_dx2, d2DU2_dx2, d2DU3_dx2 = d2_dx2(np.zeros((Ny, Nx + 1)), u, v, dx)
+            d2DU1_dy2, d2DU2_dy2, d2DU3_dy2 = d2_dy2(np.zeros((Ny, Nx + 1)), u, v, dy)
 
             # Compute dU and add onto solution fields
             p += dt * (-dE1_dx - dF1_dy + inv_Re * (d2DU1_dx2 + d2DU1_dy2))
             u += dt * (-dE2_dx - dF2_dy + inv_Re * (d2DU2_dx2 + d2DU2_dy2))
             v += dt * (-dE3_dx - dF3_dy + inv_Re * (d2DU3_dx2 + d2DU3_dy2))
 
+            # Apply boundary conditions
+            apply_boundary_conditions(p, u, v, p_inlet, u_inlet, 0.0)
+
             t += dt
         end_time = time.time()
 
-        # Compute analytical solution and MAE w.r.t. x
-        if plot_x is None:
-            if U == 1 and G == 0.01:
-                phi_analytical = (4*np.pi*G*tf)**(-0.5) * np.exp(-(x-U*tf)**2/(4*G*tf))
-                mae = np.mean(np.abs(phi_analytical - phi_numerical))
-            elif U == 1 and G == 0:
-                phi_analytical = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-U*tf)**2)
-                mae = np.mean(np.abs(phi_analytical - phi_numerical))
-    
-        # Write results to output plot and file
-        if plot_x is None:
-            axes.plot(x, phi_numerical, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
-            axes.plot(x, phi_analytical, '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
-        if plot_x is not None:
-            axes.plot(t_series, phi_series, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
-            axes.plot(t_series, phi_analytical, '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
-        with open(output_file, 'a') as file_out:
-            file_out.write(f"{trial},{N},{U},{G},{tf},{ti},{dt},{scheme},{h},{c},{d},{mae},{end_time - start_time}\n")
+        # Compute analytical solution and MAE
+        u_analytical = 0.25 * (1 - x**2)
+        mae = np.mean(np.abs(u_analytical - u))
 
+        # Compute Ma and CFL for stability assessment
+        Ma = np.sqrt(beta * (u**2 + v**2))
+        max_Ma = np.max(Ma)
+        CFL = dt / np.min([dx, dy]) / np.sqrt(beta)
+
+        # Write results to output plot and file
+        x_index = np.argmin(np.abs(x[0,:] - plot_x))
+        axes.plot(u[:,x_index], y[:,x_index], color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
+        axes.plot(u[:,x_index], y[:,x_index], '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        with open(output_file, 'a') as file_out:
+            file_out.write(f"{trial},{Nx},{Ny},{L},{H},{u_inlet},{p_inlet},{dt},{t_final},{beta},{nu},{plot_x},{x_index},{dx},{dy},{1/inv_Re},{max_Ma},{CFL},{mae},{end_time - start_time}\n")
+
+    # Save output plot
     figure.tight_layout()
+    axes.legend(loc='lower right')
     figure.savefig(plot_file)
 
-def create_grid(Nx, L, Ny=21, H=1, ghost_cells=False):
+def create_grid(Nx, L, Ny=20, H=1, ghost_cells=False):
     dx = L / Nx
     dy = H / Ny
 
     if ghost_cells:
-        x = np.linspace(0, L + dx, Nx + 1)
+        x = np.linspace(dx/2, L + dx/2, Nx + 1)
     else:
         x = np.linspace(dx/2, L - dx/2, Nx)
     y = np.linspace(dy/2, H - dy/2, Ny)
@@ -134,22 +148,22 @@ def d2_dy2(p, u, v, dy):
     return d2p_dy2, d2u_dy2, d2v_dy2
 
 def apply_boundary_conditions(p, u, v, p_inlet, u_inlet, v_inlet):
+    # Apply Dirichlet boundary conditions
     p[:,0] = p_inlet
     u[:,0] = u_inlet
     v[:,0] = v_inlet
 
+    # Apply Neumann boundary conditions
     p[:,-1] = p[:,-2]
     u[:,-1] = u[:,-2]
     v[:,-1] = v[:,-2]
-    
-    
 
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Poisson solver")
     parser.add_argument('-i', '--input_file', type=str, default=None, help='Input .csv file with parameters and trials')
     parser.add_argument('-o', '--output_file', type=str, default=None, help='Output .csv file to save results')
-    parser.add_argument('-x', '--plot_x', type=float, default=None, help='X values for plotting')
+    parser.add_argument('-p', '--plot_file', type=str, default=None, help='Output .png file to save results')
     parser.add_argument('-f', '--base_folder', type=str, default='./', help='Base folder for trials (optional)')
     args = parser.parse_args()
 
@@ -159,21 +173,22 @@ if __name__ == "__main__":
     input_file = os.path.join(base_folder, input_file)
     output_file = args.output_file
     output_file = os.path.join(base_folder, output_file)
+    plot_file = args.plot_file
+    plot_file = os.path.join(base_folder, plot_file)
 
-    # Use output_file as plot title and plot file
-    plot_title = output_file.split('/')[-1].replace('.csv', '').replace('_', ' ').title()
-    plot_file = os.path.join(base_folder, 'plots', output_file.split('/')[-1].replace('.csv', '.png'))
-
+    # Extract input parameters from input_file
     df = pd.read_csv(input_file)
     trial_ids = df['trial'].tolist()
-    N_values = df['N'].tolist()
-    U_values = df['U'].tolist()
-    G_values = df['G'].tolist()
-    tf_values = df['tf'].tolist()
-    ti_values = df['ti'].tolist()
+    Nx_values = df['Nx'].tolist()
+    Ny_values = df['Ny'].tolist()
+    L_values = df['L'].tolist()
+    H_values = df['H'].tolist()
+    U_values = df['U0'].tolist()
+    P_values = df['P0'].tolist()
     dt_values = df['dt'].tolist()
-    schemes = df['scheme'].tolist()
-
-    plot_x = args.plot_x
+    tf_values = df['tf'].tolist()
+    beta_values = df['beta'].tolist()
+    nu_values = df['nu'].tolist()
+    plot_x_values = df['plot_x'].tolist()
     
     main()
