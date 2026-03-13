@@ -14,38 +14,33 @@ Desc:   This script solves the 2-D steady-state channel flow of a viscous, incom
 """
 
 def main():
-    # Set up plot
-    figure, axes = plt.subplots(figsize=(5, 4))
-    axes.set_title(plot_title, fontsize=16)
-    axes.set_ylabel('ϕ', fontsize=12)
-    axes.tick_params(labelsize=12)
-    if plot_x is None:
-        axes.set_xlabel('x', fontsize=12)
-    if plot_x is not None:
-        axes.set_xlabel('t', fontsize=12)
-
     # Write header to output file
     with open(output_file, 'w') as file_out:
-        file_out.write('trial,N,U,G,tf,ti,dt,scheme,h,CFL,Diffusion,MAE,Time\n')
+        file_out.write('trial,Nx,Ny,dx,dy,U0,dt,tf,beta,Ma,Re,MAE,Time\n')
     
     for trial, N, U, G, tf, ti, dt, scheme in zip(trial_ids, N_values, U_values, G_values, tf_values, ti_values, dt_values, schemes):
-        # Create grid and compute initial solution
-        x, h = create_grid(N)
-        phi_initial = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-10)**2)
+        # Create grid and initialize solution
+        (x, y), dx, dy = create_grid(Nx, L, Ny, H, ghost_cells=True)
+        p = np.zeros((Nx, Ny))
+        u = u_inlet * np.ones((Nx, Ny))
+        v = np.zeros((Nx, Ny))
+        inv_Re = mu / rho / u_inlet / H
 
-        # Find index for plotting if plot_x is specified
-        x_index = None
-        if plot_x is not None:
-            x_index = np.argmin(np.abs(x - plot_x))
-
-        # Solve the transport equation using the specified scheme
+        # Solve the governing equations using the explicit scheme
         start_time = time.time()
-        if scheme == 'explicit':
-            phi_numerical, c, d, t_series, phi_series = explicit_scheme(phi_initial, N, U, G, tf, ti, dt, h, x_index=x_index)
-        elif scheme == 'implicit':
-            phi_numerical, c, d, t_series, phi_series = implicit_scheme(phi_initial, N, U, G, tf, ti, dt, h, x_index=x_index)
-        elif scheme == 'crank-nicolson':
-            phi_numerical, c, d, t_series, phi_series = crank_nicolson_scheme(phi_initial, N, U, G, tf, ti, dt, h, x_index=x_index)
+        while t < t_final:
+            # Compute spatial derivatives with central differences
+            dE1_dx, dE2_dx, dE3_dx = d_dx(u/beta, p+u**2, u*v, dx)
+            dF1_dy, dF2_dy, dF3_dy = d_dy(v/beta, u*v, p+v**2, dy)
+            d2DU1_dx2, d2DU2_dx2, d2DU3_dx2 = d2_dx2(0, u, v, dx)
+            d2DU1_dy2, d2DU2_dy2, d2DU3_dy2 = d2_dx2(0, u, v, dy)
+
+            # Compute dU and add onto solution fields
+            p += dt * (-dE1_dx - dF1_dy + inv_Re * (d2DU1_dx2 + d2DU1_dy2))
+            u += dt * (-dE2_dx - dF2_dy + inv_Re * (d2DU2_dx2 + d2DU2_dy2))
+            v += dt * (-dE3_dx - dF3_dy + inv_Re * (d2DU3_dx2 + d2DU3_dy2))
+
+            t += dt
         end_time = time.time()
 
         # Compute analytical solution and MAE w.r.t. x
@@ -56,15 +51,6 @@ def main():
             elif U == 1 and G == 0:
                 phi_analytical = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(x-U*tf)**2)
                 mae = np.mean(np.abs(phi_analytical - phi_numerical))
-
-        # Compute analytical solution and MAE w.r.t. t if plot_x is specified
-        if plot_x is not None:
-            if U == 1 and G == 0.01:
-                phi_analytical = (4*np.pi*G*t_series)**(-0.5) * np.exp(-(plot_x-U*np.array(t_series))**2/(4*G*np.array(t_series)))
-                mae = np.mean(np.abs(phi_analytical - np.array(phi_series)))
-            elif U == 1 and G == 0:
-                phi_analytical = (0.4*np.pi)**(-0.5) * np.exp(-2.5*(plot_x-U*np.array(t_series))**2)
-                mae = np.mean(np.abs(phi_analytical - np.array(phi_series)))
     
         # Write results to output plot and file
         if plot_x is None:
@@ -79,109 +65,84 @@ def main():
     figure.tight_layout()
     figure.savefig(plot_file)
 
-def create_grid(N):
-    h = 40 / (N - 1)
-    x = np.linspace(5, 45, N)
-    return x, h
+def create_grid(Nx, L, Ny=21, H=1, ghost_cells=False):
+    dx = L / Nx
+    dy = H / Ny
 
-def explicit_scheme(phi_initial, N, U, G, tf, ti, dt, h, x_index=None):
-    c = U * dt / h
-    d = G * dt / h**2
-    if c > 1 or d > 0.5:
-        print(f"Warning: Stability condition violated for explicit scheme (CFL={c:.2f}, Diffusion number={d:.2f})")
+    if ghost_cells:
+        x = np.linspace(0, L + dx, Nx + 1)
+    else:
+        x = np.linspace(dx/2, L - dx/2, Nx)
+    y = np.linspace(dy/2, H - dy/2, Ny)
+
+    return np.meshgrid(x, y), dx, dy
+
+def d_dx(p, u, v, dx):
+    p_padded = np.pad(p, ((0,0), (1,1)), mode='constant', constant_values=0)
+    u_padded = np.pad(u, ((0,0), (1,1)), mode='constant', constant_values=0)
+    v_padded = np.pad(v, ((0,0), (1,1)), mode='constant', constant_values=0)
+
+    dp_dx = p_padded[:,2:] - p_padded[:,:-2]
+    dp_dx /= 2 * dx
+    du_dx = u_padded[:,2:] - u_padded[:,:-2]
+    du_dx /= 2 * dx
+    dv_dx = v_padded[:,2:] - v_padded[:,:-2]
+    dv_dx /= 2 * dx
+
+    return dp_dx, du_dx, dv_dx
+
+def d_dy(p, u, v, dy):
+    p_padded = np.pad(p, ((1,1), (0,0)), mode='constant', constant_values=0)
+    u_padded = np.pad(u, ((1,1), (0,0)), mode='constant', constant_values=0)
+    v_padded = np.pad(v, ((1,1), (0,0)), mode='constant', constant_values=0)
+
+    dp_dy = p_padded[2:,:] - p_padded[:-2,:]
+    dp_dy /= 2 * dy
+    du_dy = u_padded[2:,:] - u_padded[:-2,:]
+    du_dy /= 2 * dy
+    dv_dy = v_padded[2:,:] - v_padded[:-2,:]
+    dv_dy /= 2 * dy
+
+    return dp_dy, du_dy, dv_dy
+
+def d2_dx2(p, u, v, dx):
+    p_padded = np.pad(p, ((0,0), (1,1)), mode='constant', constant_values=0)
+    u_padded = np.pad(u, ((0,0), (1,1)), mode='constant', constant_values=0)
+    v_padded = np.pad(v, ((0,0), (1,1)), mode='constant', constant_values=0)
+
+    d2p_dx2 = p_padded[:,2:] - 2 * p_padded[:,1:-1] + p_padded[:,:-2]
+    d2p_dx2 /= dx * dx
+    d2u_dx2 = u_padded[:,2:] - 2 * u_padded[:,1:-1] + u_padded[:,:-2]
+    d2u_dx2 /= dx * dx
+    d2v_dx2 = v_padded[:,2:] - 2 * v_padded[:,1:-1] + v_padded[:,:-2]
+    d2v_dx2 /= dx * dx
+
+    return d2p_dx2, d2u_dx2, d2v_dx2
+
+def d2_dy2(p, u, v, dy):
+    p_padded = np.pad(p, ((1,1), (0,0)), mode='constant', constant_values=0)
+    u_padded = np.pad(u, ((1,1), (0,0)), mode='constant', constant_values=0)
+    v_padded = np.pad(v, ((1,1), (0,0)), mode='constant', constant_values=0)
+
+    d2p_dy2 = p_padded[2:,:] - 2 * p_padded[1:-1,:] + p_padded[:-2,:]
+    d2p_dy2 /= dy * dy
+    d2u_dy2 = u_padded[2:,:] - 2 * u_padded[1:-1,:] + u_padded[:-2,:]
+    d2u_dy2 /= dy * dy
+    d2v_dy2 = v_padded[2:,:] - 2 * v_padded[1:-1,:] + v_padded[:-2,:]
+    d2v_dy2 /= dy * dy
+
+    return d2p_dy2, d2u_dy2, d2v_dy2
+
+def apply_boundary_conditions(p, u, v, p_inlet, u_inlet, v_inlet):
+    p[:,0] = p_inlet
+    u[:,0] = u_inlet
+    v[:,0] = v_inlet
+
+    p[:,-1] = p[:,-2]
+    u[:,-1] = u[:,-2]
+    v[:,-1] = v[:,-2]
     
-    phi = phi_initial.copy()
-    phi_new = phi_initial.copy()
-    apply_boundary_conditions(phi)
-
-    t_series = np.array([])
-    phi_series = np.array([])
-    for t_step in range(int((tf-ti)/dt)):
-        for i in range(1, N-1):
-            phi_new[i] = phi[i] - c/2 * (phi[i+1] - phi[i-1]) + d * (phi[i+1] - 2*phi[i] + phi[i-1])
-        apply_boundary_conditions(phi_new)
-        if x_index is not None:
-            t_series = np.append(t_series, ti + (t_step+1)*dt)
-            phi_series = np.append(phi_series, phi_new[x_index])
-        phi[:] = phi_new[:]
-    return phi, c, d, t_series, phi_series
-
-def implicit_scheme(phi_initial, N, U, G, tf, ti, dt, h, x_index=None):
-    c = U * dt / h
-    d = G * dt / h**2
-    aW = (-c/2 - d) * np.ones(N)
-    aP = (1 + 2*d) * np.ones(N)
-    aE = (c/2 - d) * np.ones(N)
-
-    phi = phi_initial.copy()
-    phi_new = phi_initial.copy()
-    apply_boundary_conditions(phi)
-    apply_boundary_conditions(aW)
-    apply_boundary_conditions(aP, value=1.0)
-    apply_boundary_conditions(aE)
-
-    # Forward elimination of matrix coefficients for TDMA
-    for i in range(1, N):
-        aP[i] -= aW[i] * aE[i-1] / aP[i-1]
-
-    t_series = np.array([])
-    phi_series = np.array([])
-    for t_step in range(int((tf-ti)/dt)):
-        phi_new = thomas_algorithm(N, aW, aP, aE, phi)
-        apply_boundary_conditions(phi_new)
-        if x_index is not None:
-            t_series = np.append(t_series, ti + (t_step+1)*dt)
-            phi_series = np.append(phi_series, phi_new[x_index])
-        phi[:] = phi_new[:]
-    return phi_new, c, d, t_series, phi_series
-
-def crank_nicolson_scheme(phi_initial, N, U, G, tf, ti, dt, h, x_index=None):
-    c = U * dt / h
-    d = G * dt / h**2
-    aW = (-c/4 - d/2) * np.ones(N)
-    aP = (1 + d) * np.ones(N)
-    aE = (c/4 - d/2) * np.ones(N)
-
-    phi = phi_initial.copy()
-    psi = phi_initial.copy()  # RHS vector for Crank-Nicolson
-    phi_new = phi_initial.copy()
-    apply_boundary_conditions(phi)
-    apply_boundary_conditions(aW)
-    apply_boundary_conditions(aP, value=1.0)
-    apply_boundary_conditions(aE)
-
-    # Forward elimination of matrix coefficients for TDMA
-    for i in range(1, N):
-        aP[i] -= aW[i] * aE[i-1] / aP[i-1]
-
-    t_series = np.array([])
-    phi_series = np.array([])
-    for t_step in range(int((tf-ti)/dt)):
-        for i in range(1, N-1):
-            psi[i] = (c/4 + d/2) * phi[i-1] + (1 - d) * phi[i] + (-c/4 + d/2) * phi[i+1]
-        phi_new = thomas_algorithm(N, aW, aP, aE, psi)
-        apply_boundary_conditions(phi_new)
-        if x_index is not None:
-            t_series = np.append(t_series, ti + (t_step+1)*dt)
-            phi_series = np.append(phi_series, phi_new[x_index])
-        phi[:] = phi_new[:]
-    return phi_new, c, d, t_series, phi_series
-
-def thomas_algorithm(N, aW, aP, aE, b):
-    # Forward substitution for TDMA
-    for i in range(1, N):
-        b[i] -= aW[i] * b[i-1] / aP[i-1]
     
-    # Backward substitution for TDMA
-    phi = np.zeros(N)
-    phi[-1] = b[-1] / aP[-1]
-    for i in reversed(range(0, N-1)):
-        phi[i] = (b[i] - aE[i] * phi[i+1]) / aP[i]
-    return phi
-
-def apply_boundary_conditions(phi, value=0.0):
-    phi[0] = value
-    phi[-1] = value
 
 if __name__ == "__main__":
     # Parse command-line arguments
