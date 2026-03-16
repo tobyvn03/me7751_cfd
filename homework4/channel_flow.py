@@ -32,7 +32,7 @@ def main():
     
     # Write header to output file
     with open(output_file, 'w') as file_out:
-        file_out.write('trial,Nx,Ny,L,dt,a,Re,plot_x,tf,dx,dy,CFL,MAE,Time\n')
+        file_out.write('trial,Nx,Ny,L,dt,a,Re,plot_x,k,dx,dy,CFL,MAE,Time\n')
     
     for trial, Nx, Ny, L, dt, a, Re, plot_x in zip(trial_ids, Nx_values, Ny_values, L_values, dt_values, a_values, Re_values, plot_x_values):
         # Create grid with ghost cells
@@ -49,56 +49,71 @@ def main():
         # Solve the governing equations using the explicit scheme
         t = 0
         k = 0
+        dt_current = dt
         start_time = time.time()
         while True:
             # Compute spatial derivatives
-            p_x = d_dx(p, dx)
-            u_x = d_dx_upwind(u, dx)
-            v_x = d_dx(v, dx)
+            dE1_dx = d_dx(a**2 * u, dx)
+            dE2_dx = d_dx(p + u**2, dx)
+            dE3_dx = d_dx(u * v, dx)
+            dF1_dy = d_dy(a**2 * v, dy)
+            dF2_dy = d_dy(u * v, dy)
+            dF3_dy = d_dy(p + v**2, dy)
+            d2u_dx2 = d2_dx2(u, dx)
+            d2u_dy2 = d2_dy2(u, dy)
+            d2v_dx2 = d2_dx2(v, dx)
+            d2v_dy2 = d2_dy2(v, dy)
 
-            p_y = d_dy(p, dy)
-            u_y = d_dy(u, dy)
-            v_y = d_dy(v, dy)
+            # Compute CFL-based adaptive dt
+            max_vel = np.max(np.abs(u)) # max(np.max(np.abs(u)), np.max(np.abs(v)))
+            CFL_ac = a * dt_current / np.min([dx, dy])
+            CFL_adv = max_vel * dt_current / np.min([dx, dy])
+            CFL_max = max(CFL_ac, CFL_adv)
+            if not np.isfinite(CFL_max):
+                print(f"Run #{trial}: CFL_max became non-finite (u or p diverged). Stopping.")
+                break
 
-            # Artificial compressibility pressure update
-            dp = -dt * a**2 * (u_x + v_y)
+            # Limit dt to avoid runaway shrinking
+            dt_min = 1e-12
+            if CFL_max > 0.5:
+                dt_current *= 0.5 / CFL_max
+            elif CFL_max < 0.25:
+                dt_current = min(dt, dt_current * 1.1)
+            if dt_current < dt_min:
+                print(f"Run #{trial}: dt dropped below {dt_min:.1e}; stopping to prevent underflow.")
+                break
 
-            # Convective terms (u·∇u, u·∇v)
-            du_conv = u * u_x + v * u_y
-            dv_conv = u * v_x + v * v_y
-
-            # Diffusion terms
-            d2u = d2_dx2(u, dx) + d2_dy2(u, dy)
-            d2v = d2_dx2(v, dx) + d2_dy2(v, dy)
-
-            # Update velocity
-            du = dt * (-(p_x + du_conv) + d2u / Re)
-            dv = dt * (-(p_y + dv_conv) + d2v / Re)
+            # Compute dp, du, dv
+            dp = dt_current * (-dE1_dx - dF1_dy)
+            du = dt_current * (-dE2_dx - dF2_dy + (d2u_dx2 + d2u_dy2) / Re)
+            dv = dt_current * (-dE3_dx - dF3_dy + (d2v_dx2 + d2v_dy2) / Re)
 
             # Update solution fields
             p += dp
             u += du
             v += dv
 
+            # Stop if solution diverged
+            if not np.isfinite(u).all() or not np.isfinite(p).all():
+                print(f"Run #{trial}: solution diverged (NaN/Inf) at k={k}. Stopping.")
+                break
+
             # Apply boundary conditions
             apply_boundary_conditions(p, u, v)
 
-            # Compute mean time-derivative
-            dp_dt = np.mean(np.abs(dp)) / dt
-            du_dt = np.mean(np.abs(du)) / dt
-
-            # Print stability metrics
+            # Compute stability metrics
+            dp_dt = np.mean(np.abs(dp)) / dt_current
+            du_dt = np.mean(np.abs(du)) / dt_current
             Ma = np.max(np.abs(u)) / a
-            CFL_ac = a * dt / np.min([dx, dy])
-            CFL_adv = np.max(np.abs(u)) * dt / np.min([dx, dy])
-            print(f'Run #{trial}: k = {k}, t = {t:.4f}, CFL_adv = {CFL_adv:.4e}, Ma = {Ma:.4e}, |dp/dt| = {dp_dt:.4e}, |du/dt| = {du_dt:.4e}')
+            max_abs_div = np.max(np.abs(dE1_dx + dF1_dy)) / a**2
+            print(f'Run #{trial}: k = {k}, t = {t:.4f}, dt = {dt_current:.4e}, CFL_ac = {CFL_ac:.4e}, CFL_adv = {CFL_adv:.4e}, Ma = {Ma:.4e}, |dp/dt| = {dp_dt:.4e}, |du/dt| = {du_dt:.4e}')
 
             # Break if all residuals are under tolerance, otherwise continue
             tolerance = 1e-4
-            if ((dp_dt < tolerance) and (du_dt < tolerance)) or (k > 1e4):
+            if ((dp_dt < tolerance) and (du_dt < tolerance)) or (k > 1e2):
                 break
 
-            t += dt
+            t += dt_current
             k += 1
         end_time = time.time()
 
@@ -121,7 +136,7 @@ def main():
         # Write results to output file
         CFL = max(CFL_ac, CFL_adv)
         with open(output_file, 'a') as file_out:
-            file_out.write(f"{trial},{Nx},{Ny},{L},{dt},{a},{Re},{plot_x},{t},{dx},{dy},{CFL},{mae},{end_time - start_time}\n")
+            file_out.write(f"{trial},{Nx},{Ny},{L},{dt},{a},{Re},{plot_x},{k},{dx},{dy},{CFL},{mae},{end_time - start_time}\n")
 
     # Save output plots
     figure_velocity.tight_layout()
@@ -150,23 +165,21 @@ def d_dx(f, dx):
 
     return df_dx
 
-
-def d_dx_upwind(f, dx):
-    """First-order upwind derivative in x based on local velocity sign."""
+def d_dx_upwind(f, u, dx):
     df_dx = np.zeros_like(f)
 
+    u_center = u[:, 1:-1]
     f_center = f[:, 1:-1]
     f_left = f[:, :-2]
     f_right = f[:, 2:]
 
     df_dx[:, 1:-1] = np.where(
-        f_center >= 0,
+        u_center >= 0,
         (f_center - f_left) / dx,
         (f_right - f_center) / dx,
     )
 
     return df_dx
-
 
 def d_dy(f, dy):
     df_dy = np.zeros_like(f)
@@ -174,13 +187,27 @@ def d_dy(f, dy):
 
     return df_dy
 
+def d_dy_upwind(f, v, dy):
+    df_dy = np.zeros_like(f)
+
+    v_center = v[1:-1, :]
+    f_center = f[1:-1, :]
+    f_down = f[:-2, :]
+    f_up = f[2:, :]
+
+    df_dy[1:-1, :] = np.where(
+        v_center >= 0,
+        (f_center - f_down) / dy,
+        (f_up - f_center) / dy,
+    )
+
+    return df_dy
 
 def d2_dx2(f, dx):
     d2f_dx2 = np.zeros_like(f)
     d2f_dx2[:, 1:-1] = (f[:, 2:] - 2 * f[:, 1:-1] + f[:, :-2]) / (dx * dx)
 
     return d2f_dx2
-
 
 def d2_dy2(f, dy):
     d2f_dy2 = np.zeros_like(f)
@@ -190,10 +217,11 @@ def d2_dy2(f, dy):
 
 def apply_boundary_conditions(p, u, v, p_inlet=1.0, p_outlet=0.0, u_inlet=1.0, v_inlet=0.0):
     # Apply pressure boundary conditions (constant pressure drop)
-    p[:, 0] = p_inlet
+    # p[:, 0] = p_inlet
     p[:, -1] = p[:, -2]
 
-    # Apply velocity boundary conditions (flat inlet, outflow for u)
+    # Apply velocity boundary conditions
+    # Use Neumann (zero-gradient) at inlet/outlet to avoid forcing divergence
     u[:, 0] = u_inlet
     u[:, -1] = u[:, -2]
 
