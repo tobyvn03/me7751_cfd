@@ -41,6 +41,12 @@ def plot_csv():
 
     # Save and show
     if output_filename is not None:
+        if output_filename == 'part7/plot_part7_entrance_len.png':
+            Re = np.linspace(1, 501)
+            Le = (0.631**1.6 + (0.0442*Re)**1.6)**(1/1.6)
+            # Le = Re * np.ones_like(Re)
+            plt.plot(Re, Le, color=f'C{i}', linestyle='dashed')
+            # pass
         plt.tight_layout()
         plt.savefig(output_filename)
         print(f"Plot saved as {output_filename}")

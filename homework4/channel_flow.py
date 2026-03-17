@@ -32,25 +32,24 @@ def main():
     
     # Write header to summary file
     with open(output_file, 'w') as file_out:
-        file_out.write('trial,Nx,Ny,L,dt,a,Re,plot_x,k,dx,dy,CFL_ac,MAE,Time\n')
+        file_out.write('trial,Nx,Ny,L,dt,a,Re,epsilon,plot_x,k,t,dx,dy,CFL_ac,Le,MAE,Time\n')
     
-    for trial, Nx, Ny, L, dt, a, Re, plot_x in zip(trial_ids, Nx_values, Ny_values, L_values, dt_values, a_values, Re_values, plot_x_values):
+    for trial, Nx, Ny, L, dt, a, Re, epsilon, plot_x in zip(trial_ids, Nx_values, Ny_values, L_values, dt_values, a_values, Re_values, epsilon_values, plot_x_values):
         # Create grid with ghost cells
         (x, y), dx, dy = create_grid(Nx, L, Ny, H=1)
         h = np.min([dx, dy])
         CFL_ac = a * dt / h # CFL with artificial sound speed
-        epsilon = 1e-3
 
         # Initialize solution with ghost cells
         p = np.ones((Ny + 2, Nx + 2))
-        u = np.ones((Ny + 2, Nx + 2))
+        u = np.zeros((Ny + 2, Nx + 2))
         v = np.zeros((Ny + 2, Nx + 2))
         apply_boundary_conditions(p, u, v)
         
         # Write header to verbose output
         if verbose:
             with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'w') as file_out:
-                file_out.write('k      t        CFL_adv    Ma         |dp/dt|    |du/dt|\n')
+                file_out.write('k      t        CFL_adv    Ma         |du/dt|\n')
 
         # Solve the governing equations using the explicit scheme
         t = 0
@@ -84,22 +83,24 @@ def main():
 
             apply_boundary_conditions(p, u, v)
 
-            # Write results to verbose output
-            dp_dt = np.mean(np.abs(dp)) / dt
+            # Write results to verbose output            
             du_dt = np.mean(np.abs(du)) / dt
             if verbose:
                 u_max = np.max(np.abs(u))
                 Ma = u_max / a
                 CFL_adv = u_max * dt / h # CFL using actual fluid velocity
                 with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'a') as file_out:
-                    file_out.write(f'{k:<6} {t:<8.4f} {CFL_adv:<10.4e} {Ma:<10.4e} {dp_dt:<10.4e} {du_dt:<10.4e}\n')
+                    file_out.write(f'{k:<6} {t:<8.4f} {CFL_adv:<10.4e} {Ma:<10.4e} {du_dt:<10.4e}\n')
 
-            # Break once time-derivatives approach zero
-            if ((dp_dt < 0.1) and (du_dt < 0.01)):
+            # Create heatmaps to visualize solution
+            if k % 1000 == 0 and heatmaps:
+                plot_fluid_fields(p, u, v, x_range=(0, L), y_range=(0, 1), title=f'{plot_file}_iter')
+
+            if du_dt < 1e-12:
                 break
-            else:
-                t += dt
-                k += 1
+            
+            t += dt
+            k += 1
         end_time = time.time()
 
         # Plot centerline pressure
@@ -108,11 +109,20 @@ def main():
         p_interior = p[y_index, 1:-1]
         axes_pressure.plot(x_interior, p_interior, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
 
+        # Calculate entrance length
+        du_dx = d_dx(u, dx)
+        du_dx_interior = np.abs(du_dx[y_index, 1:-1])
+        developed_indices = np.where(du_dx_interior < 1e-2)[0]
+        if len(developed_indices) > 0:
+            Le_index = developed_indices[0]
+            Le = x_interior[Le_index]
+        else:
+            Le = None # Flow never fully developed
+
         # Plot velocity profile
         y_interior = y[1:-1, 0]
         x_index = np.argmin(np.abs(x[0, :] - plot_x))
         u_interior = u[1:-1, x_index]
-        # axes_velocity.plot(u[:, x_index], y[:, 0], color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
         axes_velocity.plot(u_interior, y_interior, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
 
         # Plot analytical solution and compute MAE
@@ -122,7 +132,7 @@ def main():
 
         # Write results to summary file
         with open(output_file, 'a') as file_out:
-            file_out.write(f"{trial},{Nx},{Ny},{L},{dt},{a},{Re},{plot_x},{k},{dx},{dy},{CFL_ac},{MAE},{end_time - start_time}\n")
+            file_out.write(f"{trial},{Nx},{Ny},{L},{dt},{a},{Re},{epsilon},{plot_x},{k},{t},{dx},{dy},{CFL_ac},{Le},{MAE},{end_time - start_time}\n")
 
     # Save output plots
     figure_velocity.tight_layout()
@@ -200,6 +210,35 @@ def apply_boundary_conditions(p, u, v, p_inlet=1.0, p_outlet=0.0, u_inlet=1.0, v
     u[-1, :] = -u[-2, :]
     v[-1, :] = -v[-2, :]
 
+def plot_fluid_fields(p, u, v, x_range=(0, 1), y_range=(0, 1), title="Fluid State"):
+    """
+    Plots Heatmaps for p, u, and v (interior cells only).
+    """
+    # Slice the interior (ignore ghost cells)
+    p_int = p[1:-1, 1:-1]
+    u_int = u[1:-1, 1:-1]
+    v_int = v[1:-1, 1:-1]
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle(title, fontsize=16)
+
+    fields = [p_int, u_int, v_int]
+    names = ['Pressure (p)', 'X-Velocity (u)', 'Y-Velocity (v)']
+    cmaps = ['viridis', 'RdBu_r', 'RdBu_r'] # Diverging maps for velocity
+
+    for ax, field, name, cmap in zip(axes, fields, names, cmaps):
+        # origin='lower' ensures (0,0) is bottom-left as per CFD standard
+        im = ax.imshow(field, origin='lower', extent=[*x_range, *y_range], 
+                       cmap=cmap, aspect='auto')
+        ax.set_title(name)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        fig.colorbar(im, ax=ax)
+
+    fig.tight_layout()
+    fig.savefig(title)
+    plt.close(fig)
+
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Poisson solver")
@@ -208,6 +247,7 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--plot_file', type=str, default=None, help='Output .png file to save results')
     parser.add_argument('-f', '--base_folder', type=str, default='./', help='Base folder for trials (optional)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Write verbose output file')
+    parser.add_argument('-m', '--maps', action='store_true', help='Graph intermediate heatmaps')
     args = parser.parse_args()
 
     # Extract parameters from arguments
@@ -219,6 +259,7 @@ if __name__ == "__main__":
     plot_file = args.plot_file
     plot_file = os.path.join(base_folder, plot_file)
     verbose = args.verbose
+    heatmaps = args.maps
 
     # Extract input parameters from input_file
     df = pd.read_csv(input_file)
@@ -229,6 +270,7 @@ if __name__ == "__main__":
     dt_values = df['dt'].tolist()
     a_values = df['a'].tolist()
     Re_values = df['Re'].tolist()
+    epsilon_values = df['epsilon'].tolist()
     plot_x_values = df['plot_x'].tolist()
     
     main()
