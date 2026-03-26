@@ -5,6 +5,7 @@ import argparse
 import time
 import os
 from finite_differences import *
+from iterative_solve import sor_method
 
 """
 File:   lid_driven_flow.py
@@ -27,20 +28,55 @@ def main():
         p = np.ones((N + 2, N + 2))
         u = np.zeros((N + 2, N + 1))
         v = np.zeros((N + 1, N + 2))
-        apply_boundary_conditions(p, u, v)
-        
+        pressure_boundary_conditions(p)
+        velocity_boundary_conditions(u, v)
+
         # Write header to verbose output
 
         # Solve the governing equations using the explicit scheme
         t = 0
+        k = 0
         start_time = time.time()
         while True:
-            u += du_dt(p, u, v, nu, h, h) * dt
-            v += dv_dt(p, u, v, nu, h, h) * dt
+            # Compute intermediate velocity fields G and H
+            G = calculate_G(u, v, nu, h, h)
+            H = calculate_H(u, v, nu, h, h)
 
-            apply_boundary_conditions(p, u, v)
+            # Compute RHS of Poisson equation for pressure correction
+            dG_dx = d_dx_backward(G, h)
+            dH_dy = d_dy_backward(H, h)
+            dG_dx_padded = np.hstack([dG_dx, np.zeros((dG_dx.shape[0], 1))]) # Pad the last column of dG_dx with zeros to match p-shape (N+2, N+2)
+            dH_dy_padded = np.vstack([dH_dy, np.zeros((1, dH_dy.shape[1]))]) # Pad the last row of dH_dy with zeros       
+            RHS = dG_dx_padded + dH_dy_padded
+
+            # Solve Poisson equation for pressure correction using SOR method
+            p, _, _ = sor_method(N + 2, h, RHS, p)
+
+            # Update velocity fields using pressure correction
+            dp_dx = d_dx_forward(p, h)[:, :-1] # Chop off last column of dp_dx
+            dp_dy = d_dy_forward(p, h)[:-1, :] # Chop off last row of dp_dy
+            du_dt = G - dp_dx
+            dv_dt = H - dp_dy
+            u += du_dt * dt
+            v += dv_dt * dt
+            velocity_boundary_conditions(u, v)
+
+            # Write results to verbose output            
+            du_dt_max = np.max(du_dt)
+            dv_dt_max = np.max(dv_dt)
+            if verbose:
+                speed = np.sqrt(u**2 + v**2)
+                speed_max = np.max(speed)
+                CFL = speed_max * dt / h
+                with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'a') as file_out:
+                    file_out.write(f'{k:<6} {t:<8.4f} {CFL:<10.4e} {du_dt_max:<10.4e} {dv_dt_max:<10.4e}\n')
+
+            tolerance = 1e-12
+            if du_dt_max < tolerance and dv_dt_max < tolerance:
+                break
 
             t += dt
+            k += 1
         end_time = time.time()
 
         # Write results to summary file
@@ -69,14 +105,16 @@ def create_grid(N, H, ghost_cells=False):
         y = np.linspace(h/2, H - h/2, N)
     return np.meshgrid(x, y), h
 
-def du_dt(p, u, v, nu, dx, dy):
+def calculate_G(u, v, nu, dx, dy):
     dTxx_dx = 2 * nu * d2_dx2(u, dx)
+    
+    dv_dx = d_dx_forward(v, dx)[:, :-1] # Chop off last column of dv_dx
+    dv_dx_n = np.vstack([dv_dx, np.zeros((1, dv_dx.shape[1]))]) # Pad last row with zeros to match u-shape (N+2, N+1)
+    dv_dx_s = np.vstack([np.zeros((1, dv_dx.shape[1])), dv_dx]) # Pad first row with zeros
 
-    Txy_n = nu * (d_dy_forward(u, dy) + d_dx_forward(v, dx)) # Figure out subslice
-    Txy_s = nu * (d_dy_backward(u, dy) + d_dx_forward(v, dx)) # Figure out subslice
+    Txy_n = nu * (d_dy_forward(u, dy) + dv_dx_n) 
+    Txy_s = nu * (d_dy_backward(u, dy) + dv_dx_s)
     dTxy_dy = (Txy_n - Txy_s) / dy
-
-    dp_dx = d_dx_forward(p, dx)
 
     u_e = avg_x_forward(u)
     u_w = avg_x_backward(u)
@@ -84,44 +122,53 @@ def du_dt(p, u, v, nu, dx, dy):
 
     u_n = avg_y_forward(u)
     u_s = avg_y_backward(u)
-    v_n = avg_x_forward(v) # Figure out subslice
-    v_s = avg_x_forward(v) # Figure out subslice
+
+    avg_v_x = avg_x_forward(v)[:, :-1] # Chop off last column of avg_v_x
+    v_n = np.vstack([avg_v_x, np.zeros((1, avg_v_x.shape[1]))]) # Pad last row with zeros to match u-shape (N+2, N+1)
+    v_s = np.vstack([np.zeros((1, avg_v_x.shape[1])), avg_v_x]) # Pad first row with zeros
+
     duv_dy = (u_n * v_n - u_s * v_s) / dy
 
-    du_dt = -duu_dx - duv_dy - dp_dx + dTxx_dx + dTxy_dy
+    du_dt = -duu_dx - duv_dy + dTxx_dx + dTxy_dy
 
     return du_dt
 
-def dv_dt(p, u, v, nu, dx, dy):
+def calculate_H(u, v, nu, dx, dy):
     dTyy_dy = 2 * nu * d2_dy2(v, dy)
 
-    Txy_e = nu * (d_dy_forward(u, dy) + d_dx_forward(v, dx)) # Figure out subslice
-    Txy_w = nu * (d_dy_forward(u, dy) + d_dx_backward(v, dx)) # Figure out subslice
-    dTxy_dx = (Txy_e - Txy_w) / dx
+    du_dy = d_dy_forward(u, dy)[:-1, :] # Chop off last row of du_dy
+    du_dy_e = np.hstack([du_dy, np.zeros((du_dy.shape[0], 1))]) # Pad last column with zeros to match v-shape (N+1, N+2)
+    du_dy_w = np.hstack([np.zeros((du_dy.shape[0], 1)), du_dy]) # Pad first column with zeros
 
-    dp_dy = d_dy_forward(p, dy)
+    Txy_e = nu * (du_dy_e + d_dx_forward(v, dx))
+    Txy_w = nu * (du_dy_w + d_dx_backward(v, dx))
+    dTxy_dx = (Txy_e - Txy_w) / dx
 
     v_n = avg_y_forward(v)
     v_s = avg_y_backward(v)
     dvv_dy = (v_n**2 - v_s**2) / dy
 
-    u_e = avg_x_forward(u) # Figure out subslice
-    u_w = avg_x_backward(u) # Figure out subslice
-    v_e = avg_x_forward(v) # Figure out subslice
-    v_w = avg_x_backward(v) # Figure out subslice
+    v_e = avg_x_forward(v)
+    v_w = avg_x_backward(v)
+
+    avg_u_y = avg_y_forward(u)[:-1, :] # Chop off last row of avg_u_y
+    u_e = np.hstack([avg_u_y, np.zeros((avg_u_y.shape[0], 1))]) # Pad last column with zeros to match v-shape (N+1, N+2)
+    u_w = np.hstack([np.zeros((avg_u_y.shape[0], 1)), avg_u_y]) # Pad first column with zeros
+
     duv_dx = (u_e * v_e - u_w * v_w) / dx
 
-    dv_dt = -duv_dx - dvv_dy - dp_dy + dTyy_dy + dTxy_dx
+    dv_dt = -duv_dx - dvv_dy + dTyy_dy + dTxy_dx
 
     return dv_dt
 
-def apply_boundary_conditions(p, u, v, u_lid=0.0):
+def pressure_boundary_conditions(p):
     # Apply dp/dn=0 boundary condition
     p[:, 0] = p[:, 1]       # Left wall
     p[:, -1] = p[:, -2]     # Right wall
     p[0, :] = p[1, :]       # Bottom wall
     p[-1, :] = p[-2, :]     # Top wall
 
+def velocity_boundary_conditions(u, v, u_lid=0.0):
     # Apply v=0 boundary conditions
     v[:, 0] = -v[:, 1]      # Left wall
     v[:, -1] = -v[:, -2]    # Right wall
