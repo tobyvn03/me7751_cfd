@@ -11,7 +11,7 @@ def plot_csv():
         plt.xscale('log')
     if log_y:
         plt.yscale('log')
-    plt.title(title, fontsize=16)
+    # plt.title(title, fontsize=16)
     plt.tick_params(labelsize=12)
     # plt.grid(True, linestyle='--', alpha=0.7)
 
@@ -36,11 +36,17 @@ def plot_csv():
         if not(math.isnan(slope_i)):
             x_ref = np.array([x.min(), x.max()])
             # Scale and translate the reference line to fit the data (according to the last point)
-            y_ref = y.iloc[-1] * (x_ref / x.iloc[-1])**slope_i
+            y_ref = y.iloc[0] * (x_ref / x.iloc[0])**slope_i
             plt.plot(x_ref, y_ref, color=f'C{i}', linestyle='dashed')
 
     # Save and show
     if output_filename is not None:
+        if output_filename == 'part7/plot_part7_entrance_len.png':
+            Re = np.linspace(1, 501)
+            Le = (0.631**1.6 + (0.0442*Re)**1.6)**(1/1.6)
+            # Le = Re * np.ones_like(Re)
+            plt.plot(Re, Le, color=f'C{i}', linestyle='dashed')
+            # pass
         plt.tight_layout()
         plt.savefig(output_filename)
         print(f"Plot saved as {output_filename}")

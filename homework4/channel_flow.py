@@ -30,26 +30,30 @@ def main():
     # axes_pressure.set_ylim(0, 1)
     # axes_pressure.set_xlim(0, L_values[0])
     
-    # Write header to output file
+    # Write header to summary file
     with open(output_file, 'w') as file_out:
-        file_out.write('trial,Nx,Ny,L,dt,a,Re,plot_x,k,dx,dy,CFL,MAE,Time\n')
+        file_out.write('trial,Nx,Ny,L,dt,a,Re,epsilon,plot_x,k,t,dx,dy,CFL_ac,Le,MAE,Time\n')
     
-    for trial, Nx, Ny, L, dt, a, Re, plot_x in zip(trial_ids, Nx_values, Ny_values, L_values, dt_values, a_values, Re_values, plot_x_values):
+    for trial, Nx, Ny, L, dt, a, Re, epsilon, plot_x in zip(trial_ids, Nx_values, Ny_values, L_values, dt_values, a_values, Re_values, epsilon_values, plot_x_values):
         # Create grid with ghost cells
         (x, y), dx, dy = create_grid(Nx, L, Ny, H=1)
+        h = np.min([dx, dy])
+        CFL_ac = a * dt / h # CFL with artificial sound speed
 
         # Initialize solution with ghost cells
-        p = 1 - x/L
-        u = np.zeros((Ny + 2, Nx + 1))
-        v = np.zeros((Ny + 2, Nx + 1))
-
-        # Apply initial boundary conditions
+        p = np.ones((Ny + 2, Nx + 2))
+        u = np.zeros((Ny + 2, Nx + 2))
+        v = np.zeros((Ny + 2, Nx + 2))
         apply_boundary_conditions(p, u, v)
+        
+        # Write header to verbose output
+        if verbose:
+            with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'w') as file_out:
+                file_out.write('k      t        CFL_adv    Ma         |du/dt|\n')
 
         # Solve the governing equations using the explicit scheme
         t = 0
-        k = 0
-        dt_current = dt
+        k = 0 # Iteration count
         start_time = time.time()
         while True:
             # Compute spatial derivatives
@@ -64,79 +68,71 @@ def main():
             d2v_dx2 = d2_dx2(v, dx)
             d2v_dy2 = d2_dy2(v, dy)
 
-            # Compute CFL-based adaptive dt
-            max_vel = np.max(np.abs(u)) # max(np.max(np.abs(u)), np.max(np.abs(v)))
-            CFL_ac = a * dt_current / np.min([dx, dy])
-            CFL_adv = max_vel * dt_current / np.min([dx, dy])
-            CFL_max = max(CFL_ac, CFL_adv)
-            if not np.isfinite(CFL_max):
-                print(f"Run #{trial}: CFL_max became non-finite (u or p diverged). Stopping.")
-                break
-
-            # Limit dt to avoid runaway shrinking
-            dt_min = 1e-12
-            if CFL_max > 0.5:
-                dt_current *= 0.5 / CFL_max
-            elif CFL_max < 0.25:
-                dt_current = min(dt, dt_current * 1.1)
-            if dt_current < dt_min:
-                print(f"Run #{trial}: dt dropped below {dt_min:.1e}; stopping to prevent underflow.")
-                break
-
-            # Compute dp, du, dv
-            dp = dt_current * (-dE1_dx - dF1_dy)
-            du = dt_current * (-dE2_dx - dF2_dy + (d2u_dx2 + d2u_dy2) / Re)
-            dv = dt_current * (-dE3_dx - dF3_dy + (d2v_dx2 + d2v_dy2) / Re)
-
             # Update solution fields
+            dp = dt * (-dE1_dx - dF1_dy)
+            du = dt * (-dE2_dx - dF2_dy + (d2u_dx2 + d2u_dy2) / Re)
+            dv = dt * (-dE3_dx - dF3_dy + (d2v_dx2 + d2v_dy2) / Re)     
             p += dp
             u += du
             v += dv
 
-            # Stop if solution diverged
-            if not np.isfinite(u).all() or not np.isfinite(p).all():
-                print(f"Run #{trial}: solution diverged (NaN/Inf) at k={k}. Stopping.")
-                break
+            # Fourth-order smoothing
+            d4p_dx4 = d4_dx4(p, dx)
+            d4p_dy4 = d4_dy4(p, dy)
+            p -= epsilon * (d4p_dx4 + d4p_dy4)
 
-            # Apply boundary conditions
             apply_boundary_conditions(p, u, v)
 
-            # Compute stability metrics
-            dp_dt = np.mean(np.abs(dp)) / dt_current
-            du_dt = np.mean(np.abs(du)) / dt_current
-            Ma = np.max(np.abs(u)) / a
-            max_abs_div = np.max(np.abs(dE1_dx + dF1_dy)) / a**2
-            print(f'Run #{trial}: k = {k}, t = {t:.4f}, dt = {dt_current:.4e}, CFL_ac = {CFL_ac:.4e}, CFL_adv = {CFL_adv:.4e}, Ma = {Ma:.4e}, |dp/dt| = {dp_dt:.4e}, |du/dt| = {du_dt:.4e}')
+            # Write results to verbose output            
+            du_dt = np.mean(np.abs(du)) / dt
+            if verbose:
+                u_max = np.max(np.abs(u))
+                Ma = u_max / a
+                CFL_adv = u_max * dt / h # CFL using actual fluid velocity
+                with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'a') as file_out:
+                    file_out.write(f'{k:<6} {t:<8.4f} {CFL_adv:<10.4e} {Ma:<10.4e} {du_dt:<10.4e}\n')
 
-            # Break if all residuals are under tolerance, otherwise continue
-            tolerance = 1e-4
-            if ((dp_dt < tolerance) and (du_dt < tolerance)) or (k > 1e2):
+            # Create heatmaps to visualize solution
+            if k % 1000 == 0 and heatmaps:
+                plot_fluid_fields(p, u, v, x_range=(0, L), y_range=(0, 1), title=f'{plot_file}_iter')
+
+            if du_dt < 1e-12:
                 break
-
-            t += dt_current
+            
+            t += dt
             k += 1
         end_time = time.time()
 
-        # Compute analytical solution and MAE (only on the physical interior cells)
-        y_phys = y[1:-1, 0]
-        x_index = np.argmin(np.abs(x[0, :] - plot_x))
-        u_phys = u[1:-1, x_index]
-        u_analytical = 6 * y_phys * (1 - y_phys)
-        mae = np.mean(np.abs(u_analytical - u_phys))
-
-        # Plot results for pressure
+        # Plot centerline pressure
+        x_interior = x[0, 1:-1]
         y_index = np.argmin(np.abs(y[:,0] - 1/2))
-        axes_pressure.plot(x[y_index,:], p[y_index,:], color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
-        # axes_pressure.plot(p_inlet * (1 - x[0,:]/L), y[:,x_index], '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
-        
-        # Plot results for velocity (physical interior only)
-        axes_velocity.plot(u_phys, y_phys, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
-        axes_velocity.plot(u_analytical, y_phys, '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        p_interior = p[y_index, 1:-1]
+        axes_pressure.plot(x_interior, p_interior, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
 
-        # Write results to output file
-        CFL = max(CFL_ac, CFL_adv)
+        # Calculate entrance length
+        du_dx = d_dx(u, dx)
+        du_dx_interior = np.abs(du_dx[y_index, 1:-1])
+        developed_indices = np.where(du_dx_interior < 1e-2)[0]
+        if len(developed_indices) > 0:
+            Le_index = developed_indices[0]
+            Le = x_interior[Le_index]
+        else:
+            Le = None # Flow never fully developed
+
+        # Plot velocity profile
+        y_interior = y[1:-1, 0]
+        x_index = np.argmin(np.abs(x[0, :] - plot_x))
+        u_interior = u[1:-1, x_index]
+        axes_velocity.plot(u_interior, y_interior, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
+
+        # Plot analytical solution and compute MAE
+        u_analytical = 6 * y_interior * (1 - y_interior)
+        MAE = np.mean(np.abs(u_analytical - u_interior))
+        axes_velocity.plot(u_analytical, y_interior, '--', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+
+        # Write results to summary file
         with open(output_file, 'a') as file_out:
-            file_out.write(f"{trial},{Nx},{Ny},{L},{dt},{a},{Re},{plot_x},{k},{dx},{dy},{CFL},{mae},{end_time - start_time}\n")
+            file_out.write(f"{trial},{Nx},{Ny},{L},{dt},{a},{Re},{epsilon},{plot_x},{k},{t},{dx},{dy},{CFL_ac},{Le},{MAE},{end_time - start_time}\n")
 
     # Save output plots
     figure_velocity.tight_layout()
@@ -151,7 +147,7 @@ def create_grid(Nx, L, Ny=20, H=1, ghost_cells=True):
     dy = H / Ny
 
     if ghost_cells:
-        x = np.linspace(dx/2, L + dx/2, Nx + 1)
+        x = np.linspace(-dx/2, L + dx/2, Nx + 2)
         y = np.linspace(-dy/2, H + dy/2, Ny + 2)
     else:
         x = np.linspace(dx/2, L - dx/2, Nx)
@@ -161,81 +157,87 @@ def create_grid(Nx, L, Ny=20, H=1, ghost_cells=True):
 
 def d_dx(f, dx):
     df_dx = np.zeros_like(f)
-    df_dx[:, 1:-1] = (f[:, 2:] - f[:, :-2]) / (2 * dx)
-
-    return df_dx
-
-def d_dx_upwind(f, u, dx):
-    df_dx = np.zeros_like(f)
-
-    u_center = u[:, 1:-1]
-    f_center = f[:, 1:-1]
-    f_left = f[:, :-2]
-    f_right = f[:, 2:]
-
-    df_dx[:, 1:-1] = np.where(
-        u_center >= 0,
-        (f_center - f_left) / dx,
-        (f_right - f_center) / dx,
-    )
+    df_dx[1:-1, 1:-1] = (f[1:-1, 2:] - f[1:-1, :-2]) / (2 * dx)
 
     return df_dx
 
 def d_dy(f, dy):
     df_dy = np.zeros_like(f)
-    df_dy[1:-1, :] = (f[2:, :] - f[:-2, :]) / (2 * dy)
-
-    return df_dy
-
-def d_dy_upwind(f, v, dy):
-    df_dy = np.zeros_like(f)
-
-    v_center = v[1:-1, :]
-    f_center = f[1:-1, :]
-    f_down = f[:-2, :]
-    f_up = f[2:, :]
-
-    df_dy[1:-1, :] = np.where(
-        v_center >= 0,
-        (f_center - f_down) / dy,
-        (f_up - f_center) / dy,
-    )
+    df_dy[1:-1, 1:-1] = (f[2:, 1:-1] - f[:-2, 1:-1]) / (2 * dy)
 
     return df_dy
 
 def d2_dx2(f, dx):
     d2f_dx2 = np.zeros_like(f)
-    d2f_dx2[:, 1:-1] = (f[:, 2:] - 2 * f[:, 1:-1] + f[:, :-2]) / (dx * dx)
+    d2f_dx2[1:-1, 1:-1] = (f[1:-1, 2:] - 2 * f[1:-1, 1:-1] + f[1:-1, :-2]) / (dx * dx)
 
     return d2f_dx2
 
 def d2_dy2(f, dy):
     d2f_dy2 = np.zeros_like(f)
-    d2f_dy2[1:-1, :] = (f[2:, :] - 2 * f[1:-1, :] + f[:-2, :]) / (dy * dy)
+    d2f_dy2[1:-1, 1:-1] = (f[2:, 1:-1] - 2 * f[1:-1, 1:-1] + f[:-2, 1:-1]) / (dy * dy)
 
     return d2f_dy2
 
+def d4_dx4(f, dx):
+    d4f_dx4 = np.zeros_like(f)
+    d4f_dx4[1:-1, 2:-2] = (f[1:-1, 4:] - 4 * f[1:-1, 3:-1] + 6 * f[1:-1, 2:-2] - 4 * f[1:-1, 1:-3] + f[1:-1, :-4])# / (dx**4)
+
+    return d4f_dx4
+
+def d4_dy4(f, dy):
+    d4f_dy4 = np.zeros_like(f)
+    d4f_dy4[2:-2, 1:-1] = (f[4:, 1:-1] - 4 * f[3:-1, 1:-1] + 6 * f[2:-2, 1:-1] - 4 * f[1:-3, 1:-1] + f[:-4, 1:-1])# / (dy**4)
+
+    return d4f_dy4
+
 def apply_boundary_conditions(p, u, v, p_inlet=1.0, p_outlet=0.0, u_inlet=1.0, v_inlet=0.0):
-    # Apply pressure boundary conditions (constant pressure drop)
-    # p[:, 0] = p_inlet
-    p[:, -1] = p[:, -2]
+    # Apply pressure boundary conditions
+    p[:, -1] = 2 * p_outlet - p[:, -2] # Dirichlet pressure outlet
+    p[:, 0] = p[:, 1] # Neumann pressure inlet
 
     # Apply velocity boundary conditions
-    # Use Neumann (zero-gradient) at inlet/outlet to avoid forcing divergence
-    u[:, 0] = u_inlet
-    u[:, -1] = u[:, -2]
-
-    # v is zero at inlet/outlet (no cross-flow at boundaries)
-    v[:, 0] = v_inlet
+    u[:, 0] = 2 * u_inlet - u[:, 1] # Dirichlet velocity inlet
+    u[:, -1] = u[:, -2] # Neumann velocity outlet
+    v[:, 0] = 2 * v_inlet - v[:, 1]
     v[:, -1] = v[:, -2]
 
     # Apply no-slip wall boundary conditions for both velocity components
-    p[0, :] = p[1, :]
-    u[0, :] = -u[1, :]
+    p[0, :] = p[1, :] # Neumann pressure wall
+    u[0, :] = -u[1, :] # Dirichlet velocity wall
     v[0, :] = -v[1, :]
     p[-1, :] = p[-2, :]
     u[-1, :] = -u[-2, :]
     v[-1, :] = -v[-2, :]
+
+def plot_fluid_fields(p, u, v, x_range=(0, 1), y_range=(0, 1), title="Fluid State"):
+    """
+    Plots Heatmaps for p, u, and v (interior cells only).
+    """
+    # Slice the interior (ignore ghost cells)
+    p_int = p[1:-1, 1:-1]
+    u_int = u[1:-1, 1:-1]
+    v_int = v[1:-1, 1:-1]
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle(title, fontsize=16)
+
+    fields = [p_int, u_int, v_int]
+    names = ['Pressure (p)', 'X-Velocity (u)', 'Y-Velocity (v)']
+    cmaps = ['viridis', 'RdBu_r', 'RdBu_r'] # Diverging maps for velocity
+
+    for ax, field, name, cmap in zip(axes, fields, names, cmaps):
+        # origin='lower' ensures (0,0) is bottom-left as per CFD standard
+        im = ax.imshow(field, origin='lower', extent=[*x_range, *y_range], 
+                       cmap=cmap, aspect='auto')
+        ax.set_title(name)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        fig.colorbar(im, ax=ax)
+
+    fig.tight_layout()
+    fig.savefig(title)
+    plt.close(fig)
 
 if __name__ == "__main__":
     # Parse command-line arguments
@@ -244,6 +246,8 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output_file', type=str, default=None, help='Output .csv file to save results')
     parser.add_argument('-p', '--plot_file', type=str, default=None, help='Output .png file to save results')
     parser.add_argument('-f', '--base_folder', type=str, default='./', help='Base folder for trials (optional)')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Write verbose output file')
+    parser.add_argument('-m', '--maps', action='store_true', help='Graph intermediate heatmaps')
     args = parser.parse_args()
 
     # Extract parameters from arguments
@@ -254,6 +258,8 @@ if __name__ == "__main__":
     output_file = os.path.join(base_folder, output_file)
     plot_file = args.plot_file
     plot_file = os.path.join(base_folder, plot_file)
+    verbose = args.verbose
+    heatmaps = args.maps
 
     # Extract input parameters from input_file
     df = pd.read_csv(input_file)
@@ -264,6 +270,7 @@ if __name__ == "__main__":
     dt_values = df['dt'].tolist()
     a_values = df['a'].tolist()
     Re_values = df['Re'].tolist()
+    epsilon_values = df['epsilon'].tolist()
     plot_x_values = df['plot_x'].tolist()
     
     main()
