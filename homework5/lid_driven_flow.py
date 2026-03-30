@@ -5,7 +5,8 @@ import argparse
 import time
 import os
 from finite_differences import *
-from iterative_solve import sor_method
+from plotting import *
+from iterative_solve import sor_method, pressure_boundary_conditions
 
 """
 File:   lid_driven_flow.py
@@ -16,84 +17,130 @@ Desc:   This script solves the 2-D lid-driven cavity flow of a viscous,
 
 def main():
     # Initialize plot settings
+    fig_u, axes_u = initialize_plot(xlabel='u', ylabel='y', xlim=(-0.05, 1.05), ylim=(-0.05, 1.05))
+    fig_v, axes_v = initialize_plot(xlabel='x', ylabel='v', xlim=(-0.05, 1.05), ylim=(-0.05, 1.05))
         
     # Write header to summary output
+    with open(output_file, 'w') as file_out:
+        file_out.write('trial,N,dt,Re,alpha,t,h,MAE,Time\n')
     
-    for trial, N, dt, Re, epsilon, plot_x in zip(trial_ids, N_values, dt_values, Re_values, epsilon_values, plot_x_values):
+    for trial, N, dt, Re, alpha in zip(trial_ids, N_values, dt_values, Re_values, alpha_values):
         # Get coordinate grid at cell centers
         (x, y), h = create_grid(N, H=1, ghost_cells=True)
         nu = 1/Re
 
         # Initialize solution with ghost cells
-        p = np.ones((N + 2, N + 2))
+        p = np.zeros((N + 2, N + 2))
         u = np.zeros((N + 2, N + 1))
         v = np.zeros((N + 1, N + 2))
         pressure_boundary_conditions(p)
-        velocity_boundary_conditions(u, v)
+        velocity_boundary_conditions(u, v, u_lid=1.0)
 
         # Write header to verbose output
+        if verbose:
+            with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'w') as file_out:
+                file_out.write('t        CFL_adv    |du|       |dv|       |du/dt|    |dv/dt|    k      |dp|\n')
 
         # Solve the governing equations using the explicit scheme
-        t = 0
-        k = 0
+        t = 0.0
         start_time = time.time()
         while True:
-            # Compute intermediate velocity fields G and H
+            # Compute intermediate change in velocity fields G and H
             G = calculate_G(u, v, nu, h, h)
             H = calculate_H(u, v, nu, h, h)
+            G_padded = np.hstack([G, np.zeros((G.shape[0], 1))]) # Pad last column of G with zeros to match p-shape (N+2, N+2)
+            H_padded = np.vstack([H, np.zeros((1, H.shape[1]))]) # Pad last row of H with zeros to match p-shape (N+2, N+2)
 
             # Compute RHS of Poisson equation for pressure correction
-            dG_dx = d_dx_backward(G, h)
-            dH_dy = d_dy_backward(H, h)
-            dG_dx_padded = np.hstack([dG_dx, np.zeros((dG_dx.shape[0], 1))]) # Pad the last column of dG_dx with zeros to match p-shape (N+2, N+2)
-            dH_dy_padded = np.vstack([dH_dy, np.zeros((1, dH_dy.shape[1]))]) # Pad the last row of dH_dy with zeros       
-            RHS = dG_dx_padded + dH_dy_padded
+            dG_dx = d_dx_forward(G_padded, h)
+            dH_dy = d_dy_forward(H_padded, h)
+            # dG_dx_padded = np.hstack([dG_dx, np.zeros((dG_dx.shape[0], 1))]) # Pad the last column of dG_dx with zeros to match p-shape (N+2, N+2)
+            # dH_dy_padded = np.vstack([dH_dy, np.zeros((1, dH_dy.shape[1]))]) # Pad the last row of dH_dy with zeros       
+            RHS = dG_dx + dH_dy
 
             # Solve Poisson equation for pressure correction using SOR method
-            p, _, _ = sor_method(N + 2, h, RHS, p)
+            p, k, dp_max = sor_method(N + 2, h, RHS, p, k_max=int(1e5), alpha=alpha, tolerance=1e-6, verbose=True)
+            p -= np.mean(p) # Remove Neumann nullspace offset by zero-centering pressure
 
             # Update velocity fields using pressure correction
             dp_dx = d_dx_forward(p, h)[:, :-1] # Chop off last column of dp_dx
             dp_dy = d_dy_forward(p, h)[:-1, :] # Chop off last row of dp_dy
             du_dt = G - dp_dx
             dv_dt = H - dp_dy
-            u += du_dt * dt
-            v += dv_dt * dt
-            velocity_boundary_conditions(u, v)
+            du = du_dt * dt
+            dv = dv_dt * dt
+            u += du
+            v += dv
+            velocity_boundary_conditions(u, v, u_lid=1.0)
 
             # Write results to verbose output            
-            du_dt_max = np.max(du_dt)
-            dv_dt_max = np.max(dv_dt)
+            du_max = np.max(np.abs(du[1:-1, 1:]))
+            dv_max = np.max(np.abs(dv[1:, 1:-1]))
+            du_dt_max = np.max(np.abs(du_dt[1:-1, 1:]))
+            dv_dt_max = np.max(np.abs(dv_dt[1:, 1:-1]))
             if verbose:
-                speed = np.sqrt(u**2 + v**2)
+                speed = np.sqrt(u[1:-1, 1:]**2 + v[1:, 1:-1]**2)
                 speed_max = np.max(speed)
                 CFL = speed_max * dt / h
                 with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'a') as file_out:
-                    file_out.write(f'{k:<6} {t:<8.4f} {CFL:<10.4e} {du_dt_max:<10.4e} {dv_dt_max:<10.4e}\n')
+                    file_out.write(f'{t:<8.4f} {CFL:<10.4e} {du_max:<10.4e} {dv_max:<10.4e} {du_dt_max:<10.4e} {dv_dt_max:<10.4e} {k:<6} {dp_max:<10.4e}\n')
 
-            tolerance = 1e-12
-            if du_dt_max < tolerance and dv_dt_max < tolerance:
-                break
+            # Skip plotting and convergence check if du_max or dv_max is NaN (can occur if solution diverges)
+            if np.isnan(du_max) or np.isnan(dv_max):
+                continue
+            
+            # Create plots to visualize solution
+            if streamlines:
+                plot_fluid_streamlines(u, v, x, y, title=f'{plot_file}_streamlines_trial{trial}')
+            if heatmaps:
+                divergence = d_dx_forward(u, h)[1:-1, 1:] + d_dy_forward(v, h)[1:, 1:-1]
+                plot_heatmap(divergence[1:,1:], title=f'{plot_file}_divergence_trial{trial}')
+                plot_heatmap(p[1:-1, 1:-1], title=f'{plot_file}_pressure_trial{trial}')
+                plot_heatmap(u[1:-1, 1:], title=f'{plot_file}_xvelocity_trial{trial}')
+                plot_heatmap(v[1:, 1:-1], title=f'{plot_file}_yvelocity_trial{trial}')
+
+                tolerance = 1e-6
+                if du_max < tolerance and dv_max < tolerance:
+                    break
 
             t += dt
-            k += 1
         end_time = time.time()
 
+        # Plot y-velocity profile
+        x_interior = x[0, 1:-1]
+        y_index = np.argmin(np.abs(y[:,0] - 1/2))
+        v_interior = v[y_index, 1:-1]
+        axes_v.plot(x_interior, v_interior, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
+
+        # Plot x-velocity profile
+        y_interior = y[1:-1, 0]
+        x_index = np.argmin(np.abs(x[0, :] - 1/2))
+        u_interior = u[1:-1, x_index]
+        axes_u.plot(u_interior, y_interior, color=f'C{trial-1}', label=f"Numerical: Trial {trial}")
+
+        # Plot analytical solution and compute MAE
+        (x_N129, y_N129), h = create_grid(129, H=1, ghost_cells=True)
+        x_indices = np.array([1, 9, 10, 11, 13, 21, 30, 31, 65, 104, 111, 117, 122, 123, 124, 125, 129]) - 1
+        y_indices = np.array([1, 8, 9, 10, 14, 23, 37, 59, 65, 80, 95, 110, 123, 124, 125, 126, 129]) - 1
+        if Re == 100:
+            v_analytical = np.array([0.00000, 0.09233, 0.10091, 0.10890, 0.12317, 0.16077, 0.17507, 0.17527, 0.05454, -0.24533, -0.22445, -0.16914, -0.10313, -0.08864, -0.07391, -0.05906, 0.00000])
+            u_analytical = np.array([0.00000, -0.03717, -0.04192, -0.04775, -0.06434, -0.10150, -0.15662, -0.21090, -0.20581, -0.13641, 0.00332, 0.23151, 0.68717, 0.73722, 0.78871, 0.84123, 1.00000])
+        elif Re == 400:
+            v_analytical = np.array([0.00000, 0.18360, 0.19713, 0.20920, 0.22965, 0.28124, 0.30203, 0.30174, 0.05186, -0.38598, -0.44993, -0.23827, -0.22847, -0.19254, -0.15663, -0.12146, 0.00000])
+            u_analytical = np.array([0.00000, -0.08186, -0.09266, -0.10338, -0.14612, -0.24299, -0.32726, -0.17119, -0.11477, 0.02135, 0.16256, 0.29093, 0.55892, 0.61756, 0.68439, 0.75837, 1.00000])
+        else:
+            raise ValueError(f"Analytical solution not available for Re={Re}")
+        axes_v.plot(x_N129[x_indices, 0], v_analytical, 'x', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        axes_u.plot(u_analytical, y_N129[0, y_indices], 'x', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        MAE = 0.0 # Temporary
+
         # Write results to summary file
+        with open(output_file, 'a') as file_out:
+            file_out.write(f"{trial},{N},{dt},{Re},{alpha},{t},{h},{MAE},{end_time - start_time}\n")
 
     # Save output plots
-
-def initialize_plot(xlabel, ylabel, xlim=None, ylim=None):
-    figure, axes = plt.subplots(figsize=(5, 4))
-    axes.tick_params(labelsize=12)
-    axes.set_ylabel(ylabel, fontsize=12)
-    axes.set_xlabel(xlabel, fontsize=12)
-    figure.tight_layout()
-    if xlim:
-        axes.set_xlim(xlim)
-    if ylim:
-        axes.set_ylim(ylim)
-    return figure, axes
+    fig_u.savefig(plot_file + '_xvelocity.png')
+    fig_v.savefig(plot_file + '_yvelocity.png')
 
 def create_grid(N, H, ghost_cells=False):
     h = H / N
@@ -129,9 +176,9 @@ def calculate_G(u, v, nu, dx, dy):
 
     duv_dy = (u_n * v_n - u_s * v_s) / dy
 
-    du_dt = -duu_dx - duv_dy + dTxx_dx + dTxy_dy
+    G = -duu_dx - duv_dy + dTxx_dx + dTxy_dy
 
-    return du_dt
+    return G
 
 def calculate_H(u, v, nu, dx, dy):
     dTyy_dy = 2 * nu * d2_dy2(v, dy)
@@ -157,31 +204,24 @@ def calculate_H(u, v, nu, dx, dy):
 
     duv_dx = (u_e * v_e - u_w * v_w) / dx
 
-    dv_dt = -duv_dx - dvv_dy + dTyy_dy + dTxy_dx
+    H = -duv_dx - dvv_dy + dTyy_dy + dTxy_dx
 
-    return dv_dt
+    return H
 
-def pressure_boundary_conditions(p):
-    # Apply dp/dn=0 boundary condition
-    p[:, 0] = p[:, 1]       # Left wall
-    p[:, -1] = p[:, -2]     # Right wall
-    p[0, :] = p[1, :]       # Bottom wall
-    p[-1, :] = p[-2, :]     # Top wall
-
-def velocity_boundary_conditions(u, v, u_lid=0.0):
+def velocity_boundary_conditions(u, v, u_lid=0.0, couvette=False):
     # Apply v=0 boundary conditions
-    v[:, 0] = -v[:, 1]      # Left wall
-    v[:, -1] = -v[:, -2]    # Right wall
     v[0, :] = 0             # Bottom wall
     v[-1, :] = 0            # Top wall
+    if not couvette:
+        v[:, 0] = -v[:, 1]      # Left wall
+        v[:, -1] = -v[:, -2]    # Right wall
 
     # Apply u=0 boundary conditions
-    u[:, 0] = 0             # Left wall
-    u[:, -1] = 0            # Right wall
     u[0, :] = -u[1, :]      # Bottom wall
-    
-    # u=u_lid on the top wall only
-    u[-1, :] = 2 * u_lid - u[-2, :]
+    u[-1, :] = 2 * u_lid - u[-2, :]  # Top wall (moving lid)
+    if not couvette:
+        u[:, 0] = 0             # Left wall
+        u[:, -1] = 0            # Right wall    
 
 if __name__ == "__main__":
     # Parse command-line arguments
@@ -191,6 +231,8 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--plot_file', type=str, default=None, help='Output .png file to save results')
     parser.add_argument('-f', '--base_folder', type=str, default='./', help='Base folder for trials (optional)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Write verbose output file')
+    parser.add_argument('-m', '--maps', action='store_true', help='Graph intermediate heatmaps')
+    parser.add_argument('-s', '--streamlines', action='store_true', help='Graph velocity streamlines')
     args = parser.parse_args()
 
     # Extract parameters from arguments
@@ -202,15 +244,15 @@ if __name__ == "__main__":
     plot_file = args.plot_file
     plot_file = os.path.join(base_folder, plot_file)
     verbose = args.verbose
+    heatmaps = args.maps
+    streamlines = args.streamlines
 
     # Extract input parameters from input_file
     df = pd.read_csv(input_file)
     trial_ids = df['trial'].tolist()
     N_values = df['N'].tolist()
     dt_values = df['dt'].tolist()
-    a_values = df['a'].tolist()
     Re_values = df['Re'].tolist()
-    epsilon_values = df['epsilon'].tolist()
-    plot_x_values = df['plot_x'].tolist()
+    alpha_values = df['alpha'].tolist()
     
     main()
