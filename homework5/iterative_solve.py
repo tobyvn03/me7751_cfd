@@ -1,7 +1,6 @@
 import numpy as np
-from plotting import plot_heatmap
 
-def sor_method(N, h, Q, T_initial, k_max=10000, alpha=1.5, tolerance=1e-6, verbose=False):
+def sor_method(N, h, dt, Q, T_initial, k_max=100000, alpha=1.5, tolerance=1e-6, verbose=False):
     T = T_initial.copy()
     pressure_boundary_conditions(T)  # Ensure initial guess satisfies boundary conditions
 
@@ -35,21 +34,18 @@ def sor_method(N, h, Q, T_initial, k_max=10000, alpha=1.5, tolerance=1e-6, verbo
 
         # Apply boundary conditions and compute max change vs previous iteration
         pressure_boundary_conditions(T)
-        diff = np.abs(T[1:-1, 1:-1] - T_prev[1:-1, 1:-1])
-        max_change = np.max(diff)
+        dp_max = np.max(np.abs(T[1:-1, 1:-1] - T_prev[1:-1, 1:-1]))
+        dp_dt_max = dp_max / dt
 
         if verbose:
-            print(f'{k+1}, {max_change:.6e}')
-        if max_change < tolerance:
+            print(f'{k+1}, {dp_dt_max:.6e}')
+        if dp_dt_max < tolerance:
             break
 
         # Prepare for next iteration
         T_prev[:] = T[:]
 
-        if k % 10000 == 0 and verbose:
-            plot_heatmap(np.log10(diff), title=f'pressure_SOR.png')
-
-    return T, k, max_change
+    return T, k, dp_dt_max
 
 def pressure_boundary_conditions(p, couvette=False):
     # Apply dp/dn=0 (Neumann) boundary condition.
