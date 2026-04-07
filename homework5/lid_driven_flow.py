@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import time
 import os
+from scipy.interpolate import RegularGridInterpolator
 from finite_differences import *
 from plotting import *
 from iterative_solve import sor_method, pressure_boundary_conditions
@@ -17,8 +18,8 @@ Desc:   This script solves the 2-D lid-driven cavity flow of a viscous,
 
 def main():
     # Initialize plot settings
-    fig_u, axes_u = initialize_plot(xlabel='u', ylabel='y', xlim=(-0.05, 1.05), ylim=(-0.05, 1.05))
-    fig_v, axes_v = initialize_plot(xlabel='x', ylabel='v', xlim=(-0.05, 1.05), ylim=(-0.05, 1.05))
+    fig_u, axes_u = initialize_plot(xlabel='u', ylabel='y')
+    fig_v, axes_v = initialize_plot(xlabel='x', ylabel='v')
         
     # Write header to summary output
     with open(output_file, 'w') as file_out:
@@ -33,77 +34,90 @@ def main():
         p = np.zeros((N + 2, N + 2))
         u = np.zeros((N + 2, N + 1))
         v = np.zeros((N + 1, N + 2))
+        u_star = u.copy()
+        v_star = v.copy()
+        u_new = u.copy()
+        v_new = v.copy()
         pressure_boundary_conditions(p)
         velocity_boundary_conditions(u, v, u_lid=1.0)
 
         # Write header to verbose output
         if verbose:
             with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'w') as file_out:
-                file_out.write('t        CFL_adv    |du|       |dv|       |du/dt|    |dv/dt|    k      |dp|\n')
+                file_out.write('t        CFL_adv    |du/dt|    |dv/dt|    |dp/dt|    k\n')
 
         # Solve the governing equations using the explicit scheme
         t = 0.0
+        step = 0
         start_time = time.time()
         while True:
             # Compute intermediate change in velocity fields G and H
             G = calculate_G(u, v, nu, h, h)
             H = calculate_H(u, v, nu, h, h)
-            G_padded = np.hstack([G, np.zeros((G.shape[0], 1))]) # Pad last column of G with zeros to match p-shape (N+2, N+2)
-            H_padded = np.vstack([H, np.zeros((1, H.shape[1]))]) # Pad last row of H with zeros to match p-shape (N+2, N+2)
 
-            # Compute RHS of Poisson equation for pressure correction
-            dG_dx = d_dx_forward(G_padded, h)
-            dH_dy = d_dy_forward(H_padded, h)
-            # dG_dx_padded = np.hstack([dG_dx, np.zeros((dG_dx.shape[0], 1))]) # Pad the last column of dG_dx with zeros to match p-shape (N+2, N+2)
-            # dH_dy_padded = np.vstack([dH_dy, np.zeros((1, dH_dy.shape[1]))]) # Pad the last row of dH_dy with zeros       
-            RHS = dG_dx + dH_dy
+            # Compute intermediate velocity fields u_star and v_star
+            u_star[1:-1, 1:] = u[1:-1, 1:] + G[1:-1, 1:] * dt
+            v_star[1:, 1:-1] = v[1:, 1:-1] + H[1:, 1:-1] * dt
+            velocity_boundary_conditions(u_star, v_star, u_lid=1.0)
+
+            # Compute divergence of intermediate velocity field
+            u_padded = np.hstack([u_star, np.zeros((u_star.shape[0], 1))]) # Pad last column of u_star with zeros to match p-shape (N+2, N+2)
+            v_padded = np.vstack([v_star, np.zeros((1, v_star.shape[1]))]) # Pad last row of v_star with zeros to match p-shape (N+2, N+2)
+            du_star_dx = d_dx_backward(u_padded, h)
+            dv_star_dy = d_dy_backward(v_padded, h)
+            div_star = du_star_dx + dv_star_dy
 
             # Solve Poisson equation for pressure correction using SOR method
-            p, k, dp_max = sor_method(N + 2, h, RHS, p, k_max=int(1e5), alpha=alpha, tolerance=1e-6, verbose=True)
+            # For the projection step we need ∇²p = (1/dt)∇·u*.
+            p, k, dp_dt_max = sor_method(N + 2, h, dt, div_star / dt, p, alpha=alpha)
             p -= np.mean(p) # Remove Neumann nullspace offset by zero-centering pressure
 
             # Update velocity fields using pressure correction
-            dp_dx = d_dx_forward(p, h)[:, :-1] # Chop off last column of dp_dx
-            dp_dy = d_dy_forward(p, h)[:-1, :] # Chop off last row of dp_dy
-            du_dt = G - dp_dx
-            dv_dt = H - dp_dy
-            du = du_dt * dt
-            dv = dv_dt * dt
-            u += du
-            v += dv
-            velocity_boundary_conditions(u, v, u_lid=1.0)
+            u_new[1:-1, 1:] = u_star[1:-1, 1:] - d_dx_forward(p, h)[1:-1, 1:-1] * dt
+            v_new[1:, 1:-1] = v_star[1:, 1:-1] - d_dy_forward(p, h)[1:-1, 1:-1] * dt
+            velocity_boundary_conditions(u_new, v_new, u_lid=1.0)
 
-            # Write results to verbose output            
-            du_max = np.max(np.abs(du[1:-1, 1:]))
-            dv_max = np.max(np.abs(dv[1:, 1:-1]))
-            du_dt_max = np.max(np.abs(du_dt[1:-1, 1:]))
-            dv_dt_max = np.max(np.abs(dv_dt[1:, 1:-1]))
+            # Compute max time derivative for convergence check
+            du_dt_max = np.max(np.abs(u_new[1:-1, 1:] - u[1:-1, 1:]) / dt)
+            dv_dt_max = np.max(np.abs(v_new[1:, 1:-1] - v[1:, 1:-1]) / dt)
+
+            # Write results to verbose output
             if verbose:
-                speed = np.sqrt(u[1:-1, 1:]**2 + v[1:, 1:-1]**2)
+                speed = np.sqrt(u_new[1:-1, 1:]**2 + v_new[1:, 1:-1]**2)
                 speed_max = np.max(speed)
                 CFL = speed_max * dt / h
                 with open(output_file.replace('.csv', f'_trial{trial}.csv'), 'a') as file_out:
-                    file_out.write(f'{t:<8.4f} {CFL:<10.4e} {du_max:<10.4e} {dv_max:<10.4e} {du_dt_max:<10.4e} {dv_dt_max:<10.4e} {k:<6} {dp_max:<10.4e}\n')
+                    file_out.write(f'{t:<8.4f} {CFL:<10.4e} {du_dt_max:<10.4e} {dv_dt_max:<10.4e} {dp_dt_max:<10.4e} {k:<6}\n')
 
-            # Skip plotting and convergence check if du_max or dv_max is NaN (can occur if solution diverges)
-            if np.isnan(du_max) or np.isnan(dv_max):
+            # Skip plotting if any of the time derivatives are NaN
+            if np.isnan(du_dt_max) or np.isnan(dv_dt_max):
                 continue
-            
-            # Create plots to visualize solution
-            if streamlines:
-                plot_fluid_streamlines(u, v, x, y, title=f'{plot_file}_streamlines_trial{trial}')
-            if heatmaps:
+
+            # Graph intermediate heatmaps if requested
+            if step % 500 == 0 and heatmaps:
                 divergence = d_dx_forward(u, h)[1:-1, 1:] + d_dy_forward(v, h)[1:, 1:-1]
                 plot_heatmap(divergence[1:,1:], title=f'{plot_file}_divergence_trial{trial}')
                 plot_heatmap(p[1:-1, 1:-1], title=f'{plot_file}_pressure_trial{trial}')
                 plot_heatmap(u[1:-1, 1:], title=f'{plot_file}_xvelocity_trial{trial}')
                 plot_heatmap(v[1:, 1:-1], title=f'{plot_file}_yvelocity_trial{trial}')
+            if step % 500 == 0 and streamlines:
+                plot_fluid_streamlines(u, v, x, y, title=f'{plot_file}_streamlines_trial{trial}')
 
-                tolerance = 1e-6
-                if du_max < tolerance and dv_max < tolerance:
-                    break
+            # Check for convergence and plot results if converged
+            tolerance = 1e-6
+            if du_dt_max < tolerance and dv_dt_max < tolerance:
+                divergence = d_dx_forward(u, h)[1:-1, 1:] + d_dy_forward(v, h)[1:, 1:-1]
+                plot_heatmap(divergence[1:,1:], title=f'{plot_file}_divergence_trial{trial}')
+                plot_heatmap(p[1:-1, 1:-1], title=f'{plot_file}_pressure_trial{trial}')
+                plot_heatmap(u[1:-1, 1:], title=f'{plot_file}_xvelocity_trial{trial}')
+                plot_heatmap(v[1:, 1:-1], title=f'{plot_file}_yvelocity_trial{trial}')
+                plot_fluid_streamlines(u, v, x, y, title=f'{plot_file}_streamlines_trial{trial}')
+                break
 
             t += dt
+            step += 1
+            u[:] = u_new[:]
+            v[:] = v_new[:]
         end_time = time.time()
 
         # Plot y-velocity profile
@@ -130,17 +144,17 @@ def main():
             u_analytical = np.array([0.00000, -0.08186, -0.09266, -0.10338, -0.14612, -0.24299, -0.32726, -0.17119, -0.11477, 0.02135, 0.16256, 0.29093, 0.55892, 0.61756, 0.68439, 0.75837, 1.00000])
         else:
             raise ValueError(f"Analytical solution not available for Re={Re}")
-        axes_v.plot(x_N129[x_indices, 0], v_analytical, 'x', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
-        axes_u.plot(u_analytical, y_N129[0, y_indices], 'x', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
-        MAE = 0.0 # Temporary
+        axes_v.plot(x_N129[0, x_indices], v_analytical, 'x', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        axes_u.plot(u_analytical, y_N129[y_indices, 0], 'x', color=f'C{trial-1}', label=f"Analytical: Trial {trial}")
+        MAE = compute_mae(u_new, v_new, x, y, u_analytical, v_analytical, y_N129[y_indices, 0], x_N129[0, x_indices])
 
         # Write results to summary file
         with open(output_file, 'a') as file_out:
             file_out.write(f"{trial},{N},{dt},{Re},{alpha},{t},{h},{MAE},{end_time - start_time}\n")
 
     # Save output plots
-    fig_u.savefig(plot_file + '_xvelocity.png')
-    fig_v.savefig(plot_file + '_yvelocity.png')
+    fig_u.savefig(plot_file + '_centerline_xvelocity.png')
+    fig_v.savefig(plot_file + '_centerline_yvelocity.png')
 
 def create_grid(N, H, ghost_cells=False):
     h = H / N
@@ -151,6 +165,25 @@ def create_grid(N, H, ghost_cells=False):
         x = np.linspace(h/2, H - h/2, N)
         y = np.linspace(h/2, H - h/2, N)
     return np.meshgrid(x, y), h
+
+def compute_mae(u, v, x, y, analytical_u, analytical_v, analytical_y, analytical_x):
+    h = x[0, 1] - x[0, 0]
+    # Interpolate u at x=0.5, analytical_y
+    u_x_grid = x[0, :-1] + h / 2
+    u_y_grid = y[:, 0]
+    u_interp = RegularGridInterpolator((u_y_grid, u_x_grid), u, method='linear')
+    u_numerical = u_interp((analytical_y, 0.5 * np.ones_like(analytical_y)))
+    # Interpolate v at analytical_x, y=0.5
+    v_x_grid = x[0, :]
+    v_y_grid = y[:-1, 0] + h / 2
+    v_interp = RegularGridInterpolator((v_y_grid, v_x_grid), v, method='linear')
+    v_numerical = v_interp((0.5 * np.ones_like(analytical_x), analytical_x))
+    # Compute absolute errors
+    u_errors = np.abs(u_numerical - analytical_u)
+    v_errors = np.abs(v_numerical - analytical_v)
+    # Mean absolute error across all points
+    MAE = np.mean(np.concatenate([u_errors, v_errors]))
+    return MAE
 
 def calculate_G(u, v, nu, dx, dy):
     dTxx_dx = 2 * nu * d2_dx2(u, dx)
