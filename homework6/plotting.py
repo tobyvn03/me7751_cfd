@@ -17,9 +17,6 @@ def plot_heatmap(field, title="Divergence"):
     """
     Plots a single heatmap for the provided scalar `field` (e.g. divergence).
     """
-
-    field
-
     fig, ax = plt.subplots(figsize=(6, 5))
     im = ax.imshow(field, origin='lower', extent=[0, 1, 0, 1],
                    cmap='RdBu_r', aspect='auto')
@@ -37,8 +34,8 @@ def plot_fluid_streamlines(u, v, x, y, title="Velocity Streamlines"):
     Plots velocity streamlines for the interior fluid cells.
     """
     # Slice the interior (ignore ghost cells)
-    u_int = u[1:-1, 1:]
-    v_int = v[1:, 1:-1]
+    u_int = u[1:-1, 1:-1]
+    v_int = v[1:-1, 1:-1]
     x_int = x[1:-1, 1:-1]
     y_int = y[1:-1, 1:-1]
 
