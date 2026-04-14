@@ -18,7 +18,6 @@ Desc:   This script solves the 2-D lid-driven cavity flow of a viscous,
 # Get lattice weights and velocity directions for D2Q9
 NUM_DIRECTIONS = 9
 CS_SQUARED = 1/3
-INDEXES = np.arange(NUM_DIRECTIONS)
 CX = np.array([0, 1, 1, 0, -1, -1, -1, 0, 1])
 CY = np.array([0, 0, 1, 1, 1, 0, -1, -1, -1])
 WEIGHTS = np.array([4/9, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36])
@@ -185,7 +184,7 @@ def compute_macroscopic_variables(F, U_lid):
 def compute_equilibrium_distribution(N, rho, u, v):
     # Compute equilibrium distribution functions based on local density and velocity
     F_eq = np.zeros((N, N, NUM_DIRECTIONS))
-    for i in INDEXES:
+    for i in range(NUM_DIRECTIONS):
         F_eq[:, :, i] = rho * WEIGHTS[i] * (1 + (CX[i]*u + CY[i]*v)/CS_SQUARED + (CX[i]*u + CY[i]*v)**2/2/CS_SQUARED**2 - (u**2 + v**2)/2/CS_SQUARED)
     return F_eq
 
@@ -195,9 +194,9 @@ def apply_boundary_conditions(F, U_lid, rho):
     F[0, :, 2] = F[0, :, 6]
     F[0, :, 4] = F[0, :, 8]
     # Top wall moving lid with velocity U_lid
-    F[-1, :, 7] = F[-1, :, 3] - 2 * WEIGHTS[7] * rho[-1, :] * U_lid * CX[7] / CS_SQUARED
-    F[-1, :, 6] = F[-1, :, 2] - 2 * WEIGHTS[6] * rho[-1, :] * U_lid * CX[6] / CS_SQUARED
-    F[-1, :, 8] = F[-1, :, 4] - 2 * WEIGHTS[8] * rho[-1, :] * U_lid * CX[8] / CS_SQUARED
+    F[-1, :, 7] = F[-1, :, 3] - 2 * WEIGHTS[3] * rho[-1, :] * U_lid * CX[3] / CS_SQUARED
+    F[-1, :, 6] = F[-1, :, 2] - 2 * WEIGHTS[2] * rho[-1, :] * U_lid * CX[2] / CS_SQUARED
+    F[-1, :, 8] = F[-1, :, 4] - 2 * WEIGHTS[4] * rho[-1, :] * U_lid * CX[4] / CS_SQUARED
     # Left wall no-slip
     F[:, 0, 1] = F[:, 0, 5]
     F[:, 0, 2] = F[:, 0, 6]
