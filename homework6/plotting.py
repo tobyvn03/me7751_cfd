@@ -33,20 +33,14 @@ def plot_fluid_streamlines(u, v, x, y, title="Velocity Streamlines"):
     """
     Plots velocity streamlines for the interior fluid cells.
     """
-    # Slice the interior (ignore ghost cells)
-    u_int = u[1:-1, 1:-1]
-    v_int = v[1:-1, 1:-1]
-    x_int = x[1:-1, 1:-1]
-    y_int = y[1:-1, 1:-1]
-
     # Create the plot using figure and axes objects
     fig, ax = plt.subplots(figsize=(6, 5))
 
     # Calculate velocity magnitude for line coloring
-    speed = np.sqrt(u_int**2 + v_int**2)
+    speed = np.sqrt(u**2 + v**2)
 
     # Plot streamlines on the axes
-    strm = ax.streamplot(x_int, y_int, u_int, v_int, color=speed, cmap='viridis', 
+    strm = ax.streamplot(x, y, u, v, color=speed, cmap='viridis', 
                          linewidth=1.5, density=1.2)
 
     fig.colorbar(strm.lines, ax=ax, label='Velocity Magnitude')
