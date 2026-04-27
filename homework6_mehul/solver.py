@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # Parameters
 N = 128
-Re = 400.00
+Re = 100.00
 u_lid = 0.1
 max_iter = 200000
 tol = 1e-6

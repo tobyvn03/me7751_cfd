@@ -36,7 +36,7 @@ def plot_csv():
         if not(math.isnan(slope_i)):
             x_ref = np.array([x.min(), x.max()])
             # Scale and translate the reference line to fit the data (according to the last point)
-            y_ref = y.iloc[0] * (x_ref / x.iloc[0])**slope_i
+            y_ref = y.iloc[-1] * (x_ref / x.iloc[-1])**slope_i
             plt.plot(x_ref, y_ref, color=f'C{i}', linestyle='dashed')
 
     # Save and show
