@@ -18,28 +18,21 @@ def main():
 
     # Load mesh data
     coords, elems = load_mesh(N, mesh_directory)
-    if verbose: print(f"coords shape: {coords.shape}, elems shape: {elems.shape}")
     # visualize_mesh(N, coords, elems, output_file=f'{mesh_directory}/mesh_{N}.png')
     row_indices = np.repeat(elems, 3, axis=1).reshape(-1)
-    if verbose: print(f"row_indices: {row_indices}")
     col_indices = np.tile(elems, (1, 3)).reshape(-1)
-    if verbose: print(f"col_indices: {col_indices}")
     num_nodes = coords.shape[0]
 
     # Identify boundary nodes for Dirichlet BCs (u=0 on left/right, v=0 on top/bottom)
     bc_indices_x = np.where((coords[:, 0] == 0) | (coords[:, 0] == 1))[0]
-    if verbose: print(f"bc_indices_x: {bc_indices_x}")
     bc_indices_y = np.where((coords[:, 1] == 0) | (coords[:, 1] == 1))[0]
-    if verbose: print(f"bc_indices_y: {bc_indices_y}")
 
     # Compute the Jacobian determinants and their inverses for all elements
     det_J, inv_J_T = compute_jacobians(coords, elems)
-    if verbose: print(f"det_J shape: {det_J.shape}, inv_J_T shape: {inv_J_T.shape}")
     areas = 0.5 * np.abs(det_J)
-    if verbose: print(f"areas shape: {areas.shape}")
 
     # Assemble the global mass and stiffness matrices
-    M = assemble_mass_matrix(areas, row_indices, col_indices, num_nodes, variation='lumped').tocsr()
+    M = assemble_mass_matrix(areas, row_indices, col_indices, num_nodes, variation='consistent').tocsr()
     K = assemble_stiffness_matrix(areas, inv_J_T, nu, row_indices, col_indices, num_nodes).tocsr()
 
     # Initial condition
@@ -68,7 +61,8 @@ def main():
     else:
         print(f"CFL(t=0) = {CFL:.2e}")
 
-    # Semi-implicit time-stepping loop
+    # Crank-Nicolson time-stepping loop
+    # Δu/Δt + 0.5(uⁿ·∇)Δu + 0.5(Δu·∇)uⁿ - 0.5ν∇²(Δu) + (uⁿ·∇)uⁿ - ν∇²uⁿ = 0
     start_time = time.time()
     for t in range(Nt):
         # Compute the velocity-dependent convection matrix
@@ -104,6 +98,44 @@ def main():
             plot_solution(coords, U_new, V_new, output_file=f'{output_directory}/velocity_{(t+1) * dt:.4f}.png')
             plot_field(coords, U_new, output_file=f'{output_directory}/U_{(t+1) * dt:.4f}.png', title='U Velocity')
     end_time = time.time()
+
+
+    # Semi-implicit time-stepping loop
+    # start_time = time.time()
+    # for t in range(Nt):
+    #     # Compute the velocity-dependent convection matrix
+    #     C = assemble_convection_matrix(U_old, V_old, areas, inv_J_T, elems, row_indices, col_indices, num_nodes)
+    #     S = assemble_streamline_diffusion_matrix(U_old, V_old, areas, inv_J_T, elems, row_indices, col_indices, num_nodes, nu)
+
+    #     # Freeze the advecting velocity at the previous time step and solve the transported field implicitly.
+    #     A = (M / dt) + K + C + S
+    #     A = A.tocsr()
+    #     b_U = (M / dt) @ U_old
+    #     b_V = (M / dt) @ V_old
+
+    #     A_U, b_U = apply_dirichlet(A, b_U, bc_indices_x)
+    #     A_V, b_V = apply_dirichlet(A, b_V, bc_indices_y)
+
+    #     U_new = sparse.linalg.spsolve(A_U, b_U)
+    #     V_new = sparse.linalg.spsolve(A_V, b_V)
+
+    #     # Move to next time step
+    #     U_old = U_new
+    #     V_old = V_new
+
+    #     # Check max velocity
+    #     U_max = np.max(np.abs(U_new))
+    #     V_max = np.max(np.abs(V_new))
+    #     print(f"t={(t+1) * dt:.4f}, max|U|={U_max:.4e}, max|V|={V_max:.4e}")
+    #     if np.isnan(U_max) or np.isnan(V_max):
+    #         break
+
+    #     # Save solution every plot_every time steps
+    #     if (t + 1) % plot_every == 0:
+    #         dump_solution(coords, U_new, V_new, output_file=f'{output_directory}/solution_{(t+1) * dt:.4f}.txt')
+    #         plot_solution(coords, U_new, V_new, output_file=f'{output_directory}/velocity_{(t+1) * dt:.4f}.png')
+    #         plot_field(coords, U_new, output_file=f'{output_directory}/U_{(t+1) * dt:.4f}.png', title='U Velocity')
+    # end_time = time.time()
 
     print(f"Total simulation time: {end_time - start_time:.2f} seconds")
 
@@ -141,6 +173,10 @@ def compute_jacobians(coords, elems):
         inv_J_T[i] = np.linalg.inv(J).T
     
     return det_J, inv_J_T
+
+def assemble_Q_matrix(nu, coords, elems, row_indices, col_indices, num_nodes):
+    # Qe = Me + τ(Ce)^T
+    tau = ((2 * speed/hc)**2 + 9*(4 * nu/hc**2)**2)**(-0.5)  # SUPG parameter
 
 def assemble_mass_matrix(areas, row_indices, col_indices, num_nodes, variation='consistent'):
     # The Jacobian J transforms the reference triangle to the actual triangle.
