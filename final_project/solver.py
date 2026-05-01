@@ -1,8 +1,8 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import sparse
 import time
 import argparse
+from plotting import plot_solution plot_field
 
 """
 Name:   solver.py
@@ -18,28 +18,21 @@ def main():
 
     # Load mesh data
     coords, elems = load_mesh(N, mesh_directory)
-    if verbose: print(f"coords shape: {coords.shape}, elems shape: {elems.shape}")
     # visualize_mesh(N, coords, elems, output_file=f'{mesh_directory}/mesh_{N}.png')
     row_indices = np.repeat(elems, 3, axis=1).reshape(-1)
-    if verbose: print(f"row_indices: {row_indices}")
     col_indices = np.tile(elems, (1, 3)).reshape(-1)
-    if verbose: print(f"col_indices: {col_indices}")
     num_nodes = coords.shape[0]
 
     # Identify boundary nodes for Dirichlet BCs (u=0 on left/right, v=0 on top/bottom)
     bc_indices_x = np.where((coords[:, 0] == 0) | (coords[:, 0] == 1))[0]
-    if verbose: print(f"bc_indices_x: {bc_indices_x}")
     bc_indices_y = np.where((coords[:, 1] == 0) | (coords[:, 1] == 1))[0]
-    if verbose: print(f"bc_indices_y: {bc_indices_y}")
 
     # Compute the Jacobian determinants and their inverses for all elements
     det_J, inv_J_T = compute_jacobians(coords, elems)
-    if verbose: print(f"det_J shape: {det_J.shape}, inv_J_T shape: {inv_J_T.shape}")
     areas = 0.5 * np.abs(det_J)
-    if verbose: print(f"areas shape: {areas.shape}")
 
     # Assemble the global mass and stiffness matrices
-    M = assemble_mass_matrix(areas, row_indices, col_indices, num_nodes, variation='lumped').tocsr()
+    M = assemble_mass_matrix(areas, row_indices, col_indices, num_nodes, variation='consistent').tocsr()
     K = assemble_stiffness_matrix(areas, inv_J_T, nu, row_indices, col_indices, num_nodes).tocsr()
 
     # Initial condition
@@ -81,11 +74,14 @@ def main():
         b_U = (M / dt) @ U_old
         b_V = (M / dt) @ V_old
 
-        A_U, b_U = apply_dirichlet(A, b_U, bc_indices_x)
-        A_V, b_V = apply_dirichlet(A, b_V, bc_indices_y)
-
+        A_U = apply_dirichlet(A, bc_indices_x)
+        A_V = apply_dirichlet(A, bc_indices_y)
+        
         U_new = sparse.linalg.spsolve(A_U, b_U)
         V_new = sparse.linalg.spsolve(A_V, b_V)
+
+        U_new[bc_indices_x] = 0.0
+        V_new[bc_indices_y] = 0.0
 
         # Move to next time step
         U_old = U_new
@@ -155,10 +151,16 @@ def assemble_mass_matrix(areas, row_indices, col_indices, num_nodes, variation='
     M = sparse.coo_matrix((data, (row_indices, col_indices)), shape=(num_nodes, num_nodes))
     return M
 
+def compute_physical_shape_gradients(inv_J_T):
+    # GRAD_REF stores [dN/dxi, dN/deta] as row vectors, so the physical gradients
+    # are row-wise products with J^{-1}. The code stores J^{-T}, hence the transpose.
+    inv_J = np.transpose(inv_J_T, (0, 2, 1))
+    return np.matmul(GRAD_REF[None, :, :], inv_J)
+
 def assemble_stiffness_matrix(areas, inv_J_T, nu, row_indices, col_indices, num_nodes):
     # The inverse transpose of the Jacobian J^-T transforms reference gradients to actual gradients.
     # B = J^-T ∇_{ξ,η} [N1, N2, N3] where N1, N2, N3 are the shape functions for the reference triangle.
-    B = np.einsum('ib,eba->eia', GRAD_REF, inv_J_T)
+    B = compute_physical_shape_gradients(inv_J_T)
     Ke_local = nu * np.einsum('eia,eja,e->eij', B, B, areas)
 
     data = Ke_local.reshape(-1)
@@ -168,7 +170,7 @@ def assemble_stiffness_matrix(areas, inv_J_T, nu, row_indices, col_indices, num_
 
 def assemble_convection_matrix(U_k, V_k, areas, inv_J_T, elems, row_indices, col_indices, num_nodes):
     # Use 3-point triangle quadrature to avoid rank-deficient local convection rows.
-    B = np.einsum('ib,eba->eia', GRAD_REF, inv_J_T)  # (num_elems, 3, 2)
+    B = compute_physical_shape_gradients(inv_J_T)  # (num_elems, 3, 2)
     Ue = U_k[elems]  # (num_elems, 3)
     Ve = V_k[elems]  # (num_elems, 3)
 
@@ -199,7 +201,7 @@ def assemble_convection_matrix(U_k, V_k, areas, inv_J_T, elems, row_indices, col
     return C
 
 def assemble_streamline_diffusion_matrix(U_k, V_k, areas, inv_J_T, elems, row_indices, col_indices, num_nodes, nu):
-    B = np.einsum('ib,eba->eia', GRAD_REF, inv_J_T)
+    B = compute_physical_shape_gradients(inv_J_T)
     U_centroid = U_k[elems].mean(axis=1)
     V_centroid = V_k[elems].mean(axis=1)
     velocity_centroid = np.stack([U_centroid, V_centroid], axis=1)
@@ -218,17 +220,15 @@ def assemble_streamline_diffusion_matrix(U_k, V_k, areas, inv_J_T, elems, row_in
     S = sparse.coo_matrix((data, (row_indices, col_indices)), shape=(num_nodes, num_nodes))
     return S
 
-def apply_dirichlet(A, b, bc_indices, bc_value=0.0):
+def apply_dirichlet(A, bc_indices):
     A_bc = A.tolil(copy=True)
-    b_bc = b.copy()
 
     for idx in bc_indices:
         A_bc[:, idx] = 0.0
         A_bc[idx, :] = 0.0
         A_bc[idx, idx] = 1.0
-        b_bc[idx] = bc_value
 
-    return A_bc.tocsr(), b_bc
+    return A_bc.tocsr()
 
 def initial_condition(coords):
     x = coords[:, 0]
@@ -241,27 +241,6 @@ def dump_solution(coords, U, V, output_file):
     with open(output_file, 'w') as f:
         for i in range(coords.shape[0]):
             f.write(f"{coords[i, 0]:.6f}, {coords[i, 1]:.6f}, {U[i]:.6f}, {V[i]:.6f}\n")
-
-def plot_solution(coords, U, V, output_file):
-    plt.figure(figsize=(8, 8))
-    plt.quiver(coords[:, 0], coords[:, 1], U, V)
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.title('Velocity Field')
-    plt.axis('equal')
-    plt.savefig(output_file)
-    plt.close()
-
-def plot_field(coords, field, output_file, title='Field'):
-    plt.figure(figsize=(8, 8))
-    plt.tricontourf(coords[:, 0], coords[:, 1], field, levels=50, cmap='viridis')
-    plt.colorbar(label=title)
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.title(title)
-    plt.axis('equal')
-    plt.savefig(output_file)
-    plt.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='2-D Lid-Driven Cavity Flow with Finite Element Method')
